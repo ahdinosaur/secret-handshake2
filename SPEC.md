@@ -31,23 +31,6 @@ Mutually authenticating key agreement to establish shared secrets over an insecu
 
 ## Differences with [Secret Handshake v1](https://github.com/auditdrivencrypto/secret-handshake)
 
-- v1 uses SHA256 for hashing
-  - Should v2 use same or BLAKE3?
-- v1 uses HMAC-SHA512-256 for HMAC
-  - Should v2 uses same or BLAKE3 Keyed Hash?
-- The paper says server's first reply is `b_p, Hmac[K|a*b](b_p)`, v1 uses `b_p, Hmac[K](b_p)` (i.e. only the network key,
-- The paper uses `H = A_p | sign(A)[K | Bp | hash(a * b)]`, v1 uses `H = sign(A)[K | Bp | hash(a * b)] | A_p` (i.e. append the public key instead of prepending it)
-  - Should v2 follow paper or v1?
-- `box(K | a * b | a * B)[H]` always uses 0 as nonce, why not use a preset nonce that is sent
-- v1 uses `crypto_secretbox` for encryption, which uses XSalsa20-Poly1305
-  - v2 should use XChaCha20-Poly1305 (IETF)
-- v1 is vulnerable: https://eprint.iacr.org/2019/526.pdf
-  - v2 fixes this by including the initators's and responder's public key when deriving K1 and K2.
-- v1 uses the same key for both ed25519 (signing) and x25519 (diffie-hellman)
-  - v2 should use separate keys, even if concatenated together
-    - signing + verifying ed25519 key
-    - secret + public x25519 key
-
 ### Authenticated Encryption: v1 uses XSalsa20-Poly1305, v2 uses ChaCha20-Poly1305 (IETF)
 
 For authenticated encryption,
@@ -82,8 +65,8 @@ Secret Handshake v2 makes sure to follow the paper for this HMAC key.
 
 Secret Handshake v2 also follows the paper for the order of concatenations on the first two messages:
 
-- Initiator Hello: `a_p, hmac[K](a_p)`
-- Responder Hello: `a_p, hmac[K|a*b](a_p)`
+- Initiator Hello: $`a_p, hmac[K](a_p)`$
+- Responder Hello: $`a_p, hmac[K|a*b](a_p)`$
 
 Because this is consistent with the ordering of (ciphertext, auth_tag) in ChaCha20-Poly1305 (IETF).
 
@@ -130,6 +113,8 @@ Hash: Given a variable-length message, returns a 32-byte SHA-256 digest
 Hash(msg) -> digest
 ```
 
+This corresponds to [libsodium's `crypto_hash_256` function](https://libsodium.gitbook.io/doc/advanced/sha-2_hash_function).
+
 ### Auth and AuthVerify: HMAC-SHA512-256
 
 Auth (aka [HMAC](https://en.wikipedia.org/wiki/HMAC)): Given a variable-length message and a key, returns a 32-byte authentication tag.
@@ -164,6 +149,12 @@ DiffieHellman(secret_key, public_key) -> shared_secret
 
 This corresponds to [libsodium's `crypto_scalarmult` function](https://libsodium.gitbook.io/doc/advanced/scalar_multiplication)
 
+Scalar multiplication is a function for deriving shared secrets from a pair of secret and public X25519 keys.
+
+The order of arguments matters. In the [libsodium `crypto_scalarmult` function](https://libsodium.gitbook.io/doc/advanced/scalar_multiplication) the secret key is provided first.
+
+Note that static (long-term) keys are Ed25519 and must first be converted to X25519.
+
 ### GenerateX25519Keypair
 
 GenerateX25519Keypair: Uses a secure random number generate to generate an X25519 keypair.
@@ -184,7 +175,7 @@ ConvertVerifyingEd25519ToPublicX25519: Convert an Ed25519 (public) verifying key
 ```txt
 ConvertVerifyingEd25519ToPublicX25519(verifying_key, msg) -> public_key
 ```
-This corresponds to [libsodium's `crypto_sign_ed25519_pk_to_curve25519`](https://libsodium.gitbook.io/doc/advanced/ed25519-curve25519)
+This corresponds to [libsodium's `crypto_sign_ed25519_pk_to_curve25519` function](https://libsodium.gitbook.io/doc/advanced/ed25519-curve25519)
 
 ConvertSigningEd25519ToSecretX25519: Convert an Ed25519 (secret) signing key an X25519 secret key.
 
@@ -192,9 +183,9 @@ ConvertSigningEd25519ToSecretX25519: Convert an Ed25519 (secret) signing key an 
 ConvertSigningEd25519ToSecretX25519(signing_key, msg) -> secret_key
 ```
 
-This corresponds to [libsodium's `crypto_sign_ed25519_sk_to_curve25519`](https://libsodium.gitbook.io/doc/advanced/ed25519-curve25519)
+This corresponds to [libsodium's `crypto_sign_ed25519_sk_to_curve25519` function](https://libsodium.gitbook.io/doc/advanced/ed25519-curve25519)
 
-### Sign and Verify: [Ed25519](https://datatracker.ietf.org/doc/html/rfc8032)
+### Sign and SigVerify: [Ed25519](https://datatracker.ietf.org/doc/html/rfc8032)
 
 Sign: Given an ED25519 (secret) signing key and a message, return a signature for the message with respect to the signing key.
 
@@ -202,10 +193,10 @@ Sign: Given an ED25519 (secret) signing key and a message, return a signature fo
 Sign(signing_key, msg) -> sig
 ```
 
-Sign: Given an ED25519 (public) verifying key, a message, and a signature, return whether the signature is valid for the message with respect to the verifying key.
+SigVerify: Given an ED25519 (public) verifying key, a message, and a signature, return whether the signature is valid for the message with respect to the verifying key.
 
 ```txt
-Verify(verifying_key, msg, sig) -> boolean
+SigVerify(verifying_key, msg, sig) -> boolean
 ```
 
 ### Encrypt and Decrypt: [ChaCha20-Poly1305](https://datatracker.ietf.org/doc/html/rfc8439)
@@ -292,12 +283,12 @@ The initator also knows the responder's static public key.
 
 ### Initiator Hello
 
-The initiator generates a new ephemeral public and secret keypair.
+The initiator generates a new ephemeral public and secret keypair: $`a`$.
 
 Then sends "Initiator Hello": a message which combines:
 
-- proof that the initiator knows the network key,
-- and the initiators new ephemeral public key
+- proof that the initiator knows the network key: $`N`$,
+- and the initiator's new ephemeral public key: $`a_p`$.
 
 Initiator:
 
@@ -322,7 +313,7 @@ Initiator Hello: 64-bytes (512-bits)
 +----------------------------------+------------------+
 ```
 
-> `Auth` (aka [HMAC](https://en.wikipedia.org/wiki/HMAC)) and `AuthVerify` are functions to tag and verify a message with regards to a secret key. In this case the network identifier is used as the secret key.
+> `Auth` (aka [HMAC](https://en.wikipedia.org/wiki/HMAC)) and `AuthVerify` are functions to tag and verify a message with regards to a secret key. In this case the network identifier (`N`) is used as the secret key.
 >
 > Both the message creator and verifier have to know the same message and secret key for the verification to succeed, but the secret key is not revealed to an eavesdropper.
 >
@@ -332,9 +323,9 @@ Initiator Hello: 64-bytes (512-bits)
 
 The responder receives "Initiator Hello" and verifies the length of the message is 64 bytes.
 
-Then extracts the initiator's authentication tag (HMAC) from the first 32 bytes and initiator ephemeral public key from the last 32 bytes.
+Then extracts the initiator's authentication tag (HMAC) from the first 32 bytes and initiator ephemeral public key ($`a_p`$) from the last 32 bytes.
 
-Then uses these to verify that the initiator is using the same network key.
+Then uses these to verify that the initiator is using the same network key ($`N`$).
 
 Responder:
 
@@ -342,14 +333,30 @@ Responder:
 initiator_ephemeral_public_key = initiator_hello_msg[0..32]
 initiator_hello_msg_auth_tag = initiator_hello_msg[32..64]
 
-AuthVerify(
-  key: network_key,
-  msg: initiator_ephemeral_public_key,
-  auth_tag: initiator_hello_msg_auth_tag
+assert(
+  AuthVerify(
+    key: network_key,
+    msg: initiator_ephemeral_public_key,
+    auth_tag: initiator_hello_msg_auth_tag
+  )
 )
 ```
 
 The responder then generates the first shared secret.
+
+> Shared secrets are derived using [Diffie-Hellman scalar multiplication](https://en.wikipedia.org/wiki/Diffie%E2%80%93Hellman_key_exchange).
+>
+> If Alice combines her secret key with Bob's public key,
+>
+> And Bob combines his secret key with Alice's public key,
+>
+> Each never revealing their secret keys to one another,
+>
+> They will end up with the same shared secret.
+>
+> And meanwhile, someone could be eavesdropping on the entire conversation and not be able to come up with the same shared secret.
+>
+> Mathemagic!
 
 Responder:
 
@@ -407,7 +414,11 @@ The initiator receives "Responder Hello" and verifies the length of the message 
 
 Then extracts the responder's authentication tag (HMAC) from the first 32 bytes and responder ephemeral public key from the last 32 bytes.
 
-The initiator uses these to generate the first shared secret and verify that the responder is using the same network key and received their ephemeral public key.
+> Now that ephemeral keys have been exchanged, both ends can derive the same first shared secret: $`a ⋅ b`$.
+>
+> The initiator and responder each combine their own ephemeral secret key with the other’s ephemeral public key to produce the same shared secret on both ends. An eavesdropper doesn’t know either secret key so they can’t generate the shared secret. A man-in-the-middle could swap out the ephemeral keys in Messages 1 and 2 for their own keys, so the shared secret `a ⋅ b` alone is not enough for the initiator and responder to know that they are talking to each other and not a man-in-the-middle.
+
+The initiator uses these to generate the first shared secret ($`a ⋅ b`$) and verify that the responder is using the same network key and received their ephemeral public key.
 
 Initiator:
 
@@ -427,10 +438,12 @@ responder_hello_msg_key = Hash(
   )
 )
 
-AuthVerify(
-  key: responder_hello_msg_key,
-  msg: responder_ephemeral_public_key,
-  auth_tag: responder_hello_msg_auth_tag
+assert(
+  AuthVerify(
+    key: responder_hello_msg_key,
+    msg: responder_ephemeral_public_key,
+    auth_tag: responder_hello_msg_auth_tag
+  )
 )
 ```
 
@@ -438,10 +451,12 @@ AuthVerify(
 
 Now it's time for the initiator to authenticate themself to the responder.
 
+> Because the initiator already knows the responder's static Ed25519 verifying (public) key $`B_p`$, both can derive a second secret using the initiator's ephemeral key pair (either the public or the secret key) and the responder's static key pair (respectively either the secret or private key) that will allow the initiator to send a message that only the real responder can read and not a man-in-the-middle.
+
 First,
 
-- they convert the responder's static Ed25519 verifying key to a static X25519 public key,
-- then, they compute the next shared secret.
+- they convert the responder's static Ed25519 verifying (public) key $`B_p`$ to a static X25519 public key,
+- then, they compute the second shared secret ($`a ⋅ B`$).
 
 Initiator:
 
@@ -454,7 +469,7 @@ shared_secret_aB = DiffieHellman(
 )
 ```
 
-The initiator creates a authentication proof:
+The initiator creates an authentication proof:
 
 Initiator:
 
@@ -515,7 +530,7 @@ Initiator Authenticate (plaintext): 128-bytes (1024-bits)
 
 Then the initiator encrypts this message.
 
-The symmetric key for the encryption combines the current shared knowledge, including shared secrets.
+The symmetric key for the encryption combines the current shared knowledge, including shared secrets $`a ⋅ b`$ and $`a ⋅ B`$.
 
 The nonce for the encryption is 24 bytes of zeros.
 
@@ -552,9 +567,11 @@ Initiator Authenticate (ciphertext): 144-bytes (1152-bits)
 
 ### Responder Accept
 
-The responder receives "Initiator Authenticate" and verifies the length of the message is 114 bytes.
+> The initiator reveals their identity to the responder by sending their static Ed25519 verifying (public) key. The initiator also makes a signature using their static Ed25519 verifying (public) key. By signing the keys used earlier in the handshake the initiator proves their identity and confirms that they do indeed wish to be part of this handshake.
 
-Then creates the same symmetric key used for encryption, creating the same shared secrets as necessary:
+The responder receives "Initiator Authenticate" and verifies the length of the message is 144 bytes.
+
+Then creates the same symmetric key used for encryption, creating the $`a ⋅ B`$ shared secret as necessary:
 
 Responder:
 
@@ -578,7 +595,7 @@ initiator_auth_msg_key = Hash(
 ```
 
 
-Then tries to decrypt the message (which will also verify the authentication tag):
+Then tries to decrypt the message (which will also verify the authentication tag).
 
 (Using the same 24 bytes of zeros as a nonce.)
 
@@ -594,11 +611,37 @@ initiator_auth_msg_plaintext = Decrypt(
 
 Now the responder can deconstruct the Initiator Authenticate message into constituent parts.
 
+(The length of the plaintext is 128 bytes.)
+
+Responder:
+
 ```txt
 initiator_auth_proof_sig = initiator_auth_msg_plaintext[0..64]
 initiator_static_verifying_key = initiator_auth_msg_plaintext[64..96]
 initiator_optional_auth_payload = initiator_auth_msg_plaintext[96..128]
 ```
+
+Then generate the signed proof and verify the signature is correct:
+
+Responder:
+
+```txt
+initiator_auth_proof = Concat(
+  network_key,
+  responder_static_verifying_key,
+  Hash(shared_secret_ab),
+)
+
+assert(
+  SigVerify(
+    key: initiator_static_verifying_key,
+    msg: initiator_auth_proof,
+    sig: initiator_auth_proof_sig
+  )
+)
+```
+
+This confirms
 
 
 ### Responder Authenticate
