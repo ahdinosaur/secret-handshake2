@@ -416,7 +416,7 @@ Then extracts the responder's authentication tag (HMAC) from the first 32 bytes 
 
 > Now that ephemeral keys have been exchanged, both ends can derive the same first shared secret: $`a ⋅ b`$.
 >
-> The initiator and responder each combine their own ephemeral secret key with the other’s ephemeral public key to produce the same shared secret on both ends. An eavesdropper doesn’t know either secret key so they can’t generate the shared secret. A man-in-the-middle could swap out the ephemeral keys in Messages 1 and 2 for their own keys, so the shared secret `a ⋅ b` alone is not enough for the initiator and responder to know that they are talking to each other and not a man-in-the-middle.
+> The initiator and responder each combine their own ephemeral secret key with the other’s ephemeral public key to produce the same shared secret on both ends. An eavesdropper doesn’t know either secret key so they can’t generate the shared secret. A man-in-the-middle could swap out the ephemeral keys in Messages 1 and 2 for their own keys, so the shared secret $`a ⋅ b`$ alone is not enough for the initiator and responder to know that they are talking to each other and not a man-in-the-middle.
 
 The initiator uses these to generate the first shared secret ($`a ⋅ b`$) and verify that the responder is using the same network key and received their ephemeral public key.
 
@@ -650,7 +650,71 @@ This confirms
 
 ### Post-Handshake Knowledge
 
-## Secret Channel
+At this point the handshake has succeeded. The initiator and responder have proven their identities to each other.
+
+After the handshake, the initiator and responder share these secrets:
+
+- $`N`$
+- $`a ⋅ b`$
+- $`a ⋅ B`$
+- $`A ⋅ b`$
+
+Since the Responder Authenticate encryption key was $`Hash(Concat(N, a ⋅ b, a ⋅ B, A ⋅ b, a_p, b_p))`, we won't directly use that again, instead hash one more time.
+
+The final secret is:
+
+```txt
+shared_secret_final = Hash(responder_auth_msg_key)
+```
+
+Using `shared_secret_final` we can derive any more keys we need.
+
+Once you have the final secret, it's prudent to clean any references to any previous shared secrets.
+
+Now we can setup a pair of symmetric encryption keys for securely bulk exchanging further messages.
+
+As our key to encrypt from initiator to responder:
+
+```txt
+initiator_to_responder_key = Hash(Concat(shared_secret_final, responder_static_verifying_key))
+```
+And our key to encrypt from responder to initiator:
+
+```txt
+responder_to_initiator_key = Hash(Concat(shared_secret_final, initiator_static_verifying_key))
+```
+
+### Secret Channel
+
+["Secret Channel"](https://github.com/ahdinosaur/secret-channel) is a secure message stream protocol, designed for after Secret Handshake.
+
+## Comparisons
+
+### [Noise Protocol Framework](https://noiseprotocol.org/noise.html)
+
+Noise is a generalized framework for Diffie-Hellman key agreements and post-handshake transports.
+
+Noise provides a multiplicity of patterns, from every variety. Some are more secure, less secure, in-between, a tapestry of trade-offs.
+
+Different from Secret Handshake, Noise uses HKDF to generate the necessary keys at every step: [15.2 Hash functions and hashing](https://noiseprotocol.org/noise.html#hash-functions-and-hashing)
+
+> HKDF is well-known and HKDF "chains" are used in similar ways in other protocols (e.g. Signal, IPsec, TLS 1.3).
+>
+> HKDF has a [published analysis](http://eprint.iacr.org/2010/264).
+>
+> HKDF applies multiple layers of hashing between each MixKey() input. This "extra" hashing might mitigate the impact of hash function weakness.
+
+Secret Handshake has a single pattern for a specific purpose.
+
+Secret Handshake is most similar to Noise pattern `XK1psk0`, however the Noise documentation states:
+
+> *Misusing public keys as secrets*: It might be tempting to use a pattern with a pre-message public key and assume that a successful handshake implies the other party's knowledge of the public key. Unfortunately, this is not the case, since setting public keys to invalid values might cause predictable DH output. For example, a Noise_NK_25519 initiator might send an invalid ephemeral public key to cause a known DH output of all zeros, despite not knowing the responder's static public key. If the parties want to authenticate with a shared secret, it should be used as a PSK.
+>
+> *Channel binding*: Depending on the DH functions, it might be possible for a malicious party to engage in multiple sessions that derive the same shared secret key by setting public keys to invalid values that cause predictable DH output (as in the previous bullet). It might also be possible to set public keys to equivalent values that cause the same DH output for different inputs. This is why a higher-level protocol should use the handshake hash (h) for a unique channel binding, instead of ck, as explained in Section 11.2.
+
+Secret Handshake is designed for mutual authentication, where the initiator must authenticate first, signing a message that references the responder's static key.
+
+To do the same in Noise seems to require extra steps.
 
 ## References
 
