@@ -71,14 +71,21 @@ i.e. the HMAC key is the network key _and_ and product of the new ephemerals key
 In Secret Handshake v1, the responder's first reply was:
 
 ```math
-b_p, hmac[K](b_p)
+hmac[K](b_p), b_p
 ```
 
 i.e. the HMAC key is only the network key.
 
-Secret Handshake v2 makes sure to follow the paper.
+(And the order of concatenation is reversed.)
 
-For other mismatches (such as the order of concatentations), v2 follows v1 instead of the paper.
+Secret Handshake v2 makes sure to follow the paper for this HMAC key.
+
+Secret Handshake v2 also follows the paper for the order of concatenations on the first two messages:
+
+- Initiator Hello: `a_p, hmac[K](a_p)`
+- Responder Hello: `a_p, hmac[K|a*b](a_p)`
+
+Because this is consistent with the ordering of (ciphertext, auth_tag) in ChaCha20-Poly1305 (IETF).
 
 ### Secret Handshake v1 Vulnerability
 
@@ -89,11 +96,9 @@ The vulnerability combines two aspects of intentionally weak public keys:
 - X25519: With an intentionally weak public key, the shared secret produced by a Diffie-Hellman with that public key is known, regardless of the other secret key.
 - Ed25519: With an intentionally weak public key, it's possible to produce a signature that is a valid signature for any message, with respect to the weak public key.
 
-The first solution in the paper (adopted by v1) is to reject weak public keys with low order points.
+The first solution in the paper (adopted by Secret Handshake v1) is to reject weak public keys with low order points.
 
-In v2 we will document this in the specification. (Unlike v1, where this vulnerability was never disclosed.)
-
-In v2 we will also follow the second suggestion in the paper:
+In Secret Handshake v2 we will also follow the second suggestion in the paper:
 
 > Our alternative suggestion is to include the initiator’s and responder’s public key when deriving K1 and K2.
 >
@@ -111,7 +116,7 @@ This also follows the advice [on the libsodium scalar multiplication page](https
 
 ### Initiator Authenticate Payload
 
-TODO
+Secret Handshake v2 adds an optional extra 32-byte payload to the Initiator Authenticate message, so an initiator can authenticate to a responder who doesn't recognize their static public key, such as an invite code.
 
 ## Functions
 
@@ -151,6 +156,8 @@ This corresponds to [libsodium's `crypto_auth_verify` function](https://libsodiu
 
 DiffieHellman: Given a local secret key and a remote public key, generate a shared secret.
 
+(Note: This function MUST check if given public key is weak (has low order), before proceeding to generate a shared secret.)
+
 ```txt
 DiffieHellman(secret_key, public_key) -> shared_secret
 ```
@@ -177,12 +184,15 @@ ConvertVerifyingEd25519ToPublicX25519: Convert an Ed25519 (public) verifying key
 ```txt
 ConvertVerifyingEd25519ToPublicX25519(verifying_key, msg) -> public_key
 ```
+This corresponds to [libsodium's `crypto_sign_ed25519_pk_to_curve25519`](https://libsodium.gitbook.io/doc/advanced/ed25519-curve25519)
 
 ConvertSigningEd25519ToSecretX25519: Convert an Ed25519 (secret) signing key an X25519 secret key.
 
 ```txt
 ConvertSigningEd25519ToSecretX25519(signing_key, msg) -> secret_key
 ```
+
+This corresponds to [libsodium's `crypto_sign_ed25519_sk_to_curve25519`](https://libsodium.gitbook.io/doc/advanced/ed25519-curve25519)
 
 ### Sign and Verify: [Ed25519](https://datatracker.ietf.org/doc/html/rfc8032)
 
@@ -232,34 +242,41 @@ From the [Secret Handshake Paper](https://dominictarr.github.io/secret-handshake
 \begin{align*}
     ? \to \;?\;   &: a_{p}, hmac_{K}(a_{p})   \\
     ? \gets \;?\; &: b_{p}, hmac_{[K|a\cdot b]}(b_{p}) \\
-    H&=A_{p}|Sign_A(K|B_{p}|hash(a\cdot b)) \\
+    H&=Sign_A(K|B_{p}|hash(a\cdot b))|A_{p} \\
     A \to B       &: Box_{[K|a \cdot b | a \cdot B]}(H)\\
     A \gets B     &:
       Box_{[K|a \cdot b | a \cdot B | A \cdot b]}(Sign_B(K|H|hash(a\cdot b)) )\\
 \end{align*}
 ```
 
-Here's a greatly simplified simplified outline:
+We will break this down into the following sequence:
 
-1. Initiator: Send new ephemeral public key in cleartext, with an authentication token (using network key).
-2. Responder: Send new ephemeral public key in cleartext, with an authentication token (using network key and more).
-3. Initiator: Send static public key and a signature of current state (using own static key), encrypted with current combined cipher.
-4. Responder: If accepting, send static public key and a signature of current state (using own static key), encrypted with current combined cipher.
+```mermaid
+sequenceDiagram
+    Note over Initiator, Responder: Pre-Handshake Knowledge
+    Initiator->>Responder: Initiator Hello
+    Note over Responder: Responder Acknowledge
+    Responder->>Initiator: Responder Hello
+    Note over Initiator: Initiator Acknowledge
+    Initiator->>Responder: Initiator Authenticate
+    Note over Responder: Responder Accept
+    Responder->>Initiator: Responder Authenticate
+    Note over Initiator: Initiator Accept
+    Note over Initiator, Responder: Post-Handshake Knowledge
+```
+
+1. [Pre-Handshake Knowledge](#pre-handshake-knowledge): What is known by Initiator and Responder before the handshake begins
+1. [Initiator Hello](#initiator-hello): Initiator sends new ephemeral X22519 public key in cleartext, with an authentication token (using network key).
+1. [Responder Acknowledge](#responder-acknowledge): Responder receives initiatior's ephemeral X25519 public key and checks authentication token (using network key).
+1. [Responder Hello](#responder-hello): Responder sends new ephemeral X22519 public key in cleartext, with an authentication (using key derived from network key and first shared secret).
+1. [Initiator Acknowledge](#initiator-acknowledge): Initiator receives initiator's ephemeral X25519 public key and checks authentication token (using key derived from network key and first shared secret).
+1. [Initiator Authenticate](#initiator-authenticate): Initiator sends own static Ed25519 verifying (public) key and a signature of current state (using own static Ed25519 signing key), encrypted with key derived from network key, both ephemeral public keys, and two shared secrets.
+1. [Responder Accept](#responder-accept): Responder receives and decrypts initiator's static Ed25519 verifying (public) key, signature, and optional payload. Checks signature matches key. Either accepts initiator based on key or based on optional payload.
+1. [Responder Authenticate](#responder-authenticate): Responder sends own static Ed25519 verifying (public) key and a signature of current state (using own static Ed25519 signing key), encrypted with key derived from network key, both ephemeral public keys, and three shared secrets.
+1. [Initiator Accept](#initiator-accept): Initiator receives and decrypts responder's signature. Checks signature matches key.
+1. [Post-Handshake Knowledge](#post-handshake-knowledge): What is known by initiator and responder after the handshake ends
 
 > _Initiator_ is the computer dialing the TCP connection and _responder_ is the computer receiving it. Once the handshake is complete this distinction goes away.
-
-As a sequence diagram with more detail:
-
-- `N`: network key
-- `*_pk`: public key
-- `*_sk`: secret key
-- `A_*`: initiator static
-- `B_*`: responder static
-- `a_*`: initiator ephemeral
-- `b_*`: responder ephemeral
-- `ss_*`: shared secret
-
-Now let's break this down in full:
 
 ### Pre-Handshake Knowledge
 
@@ -286,11 +303,11 @@ Initiator:
 
 ```txt
 initiator_hello_msg = Concat(
+  initiator_ephemeral_public_key,
   Auth(
     msg: initiator_ephemeral_public_key,
     key: network_key
-  ),
-  initiator_ephemeral_public_key
+  )
 )
 ```
 
@@ -298,11 +315,11 @@ Which looks like:
 
 ```txt
 Initiator Hello: 64-bytes (512-bits)
-+------------------+----------------------------------+
-|     auth tag     |  initiator ephemeral public key  |
-+------------------+----------------------------------+
-|  32B (256-bits)  |          32B (256-bits)          |
-+------------------+----------------------------------+
++----------------------------------+------------------+
+|  initiator ephemeral public key  |     auth tag     |
++----------------------------------+------------------+
+|          32B (256-bits)          |  32B (256-bits)  |
++----------------------------------+------------------+
 ```
 
 > `Auth` (aka [HMAC](https://en.wikipedia.org/wiki/HMAC)) and `AuthVerify` are functions to tag and verify a message with regards to a secret key. In this case the network identifier is used as the secret key.
@@ -322,8 +339,8 @@ Then uses these to verify that the initiator is using the same network key.
 Responder:
 
 ```txt
-initiator_hello_msg_auth_tag = initiator_hello_msg[0..32]
-initiator_ephemeral_public_key = initiator_hello_msg[32..64]
+initiator_ephemeral_public_key = initiator_hello_msg[0..32]
+initiator_hello_msg_auth_tag = initiator_hello_msg[32..64]
 
 AuthVerify(
   key: network_key,
@@ -338,8 +355,8 @@ Responder:
 
 ```txt
 shared_secret_ab = DiffieHellman(
-    secret_key: responder_ephemeral_secret_key,
-    public_key: initiator_ephemeral_public_key
+  secret_key: responder_ephemeral_secret_key,
+  public_key: initiator_ephemeral_public_key
 )
 ```
 
@@ -358,18 +375,18 @@ Responder:
 
 ```txt
 responder_hello_msg_key = Hash(
-    Concat(
-        network_key,
-        shared_secret_ab,
-    )
+  Concat(
+    network_key,
+    shared_secret_ab,
+  )
 )
 
 responder_hello_msg = Concat(
+  initiator_ephemeral_public_key,
   Auth(
     msg: initiator_ephemeral_public_key,
     key: responder_hello_msg_key,
-  ),
-  initiator_ephemeral_public_key
+  )
 )
 ```
 
@@ -377,11 +394,11 @@ Which looks like:
 
 ```txt
 Responder Hello: 64-bytes (512-bits)
-+------------------+----------------------------------+
-|     auth tag     |  responder ephemeral public key  |
-+------------------+----------------------------------+
-|  32B (256-bits)  |          32B (256-bits)          |
-+------------------+----------------------------------+
++----------------------------------+------------------+
+|  responder ephemeral public key  |     auth tag     |
++----------------------------------+------------------+
+|          32B (256-bits)          |  32B (256-bits)  |
++----------------------------------+------------------+
 ```
 
 ### Initiator Acknowledge
@@ -395,19 +412,19 @@ The initiator uses these to generate the first shared secret and verify that the
 Initiator:
 
 ```txt
-responder_hello_msg_auth_tag = responder_hello_msg[0..32]
-responder_ephemeral_public_key = responder_hello_msg[32..64]
+responder_ephemeral_public_key = responder_hello_msg[0..32]
+responder_hello_msg_auth_tag = responder_hello_msg[32..64]
 
 shared_secret_ab = DiffieHellman(
-    secret_key: initiator_ephemeral_secret_key,
-    public_key: responder_ephemeral_public_key
+  secret_key: initiator_ephemeral_secret_key,
+  public_key: responder_ephemeral_public_key
 )
 
 responder_hello_msg_key = Hash(
-    Concat(
-        network_key,
-        shared_secret_ab,
-    )
+  Concat(
+    network_key,
+    shared_secret_ab,
+  )
 )
 
 AuthVerify(
@@ -424,7 +441,7 @@ Now it's time for the initiator to authenticate themself to the responder.
 First,
 
 - they convert the responder's static Ed25519 verifying key to a static X25519 public key,
-- and compute the next shared secret.
+- then, they compute the next shared secret.
 
 Initiator:
 
@@ -439,28 +456,149 @@ shared_secret_aB = DiffieHellman(
 
 The initiator creates a authentication proof:
 
+Initiator:
+
+```txt
+initiator_auth_proof = Concat(
+  network_key,
+  responder_static_verifying_key,
+  Hash(shared_secret_ab),
+)
+```
+
+Which looks like:
+
+```txt
+Initiator Authenticate Proof: 96-bytes (768-bits)
++------------------+--------------------------------+------------------------+
+|   network key    | responder static verifying key | Hash(shared_secret_ab) |
++------------------+--------------------------------+------------------------+
+|  32B (256-bits)  |         32B (256-bits)         |      32B (256-bits)    |
++------------------+--------------------------------+------------------------+
+```
+
 Which is then signed.
 
 Initiator:
 
 ```txt
 initiator_auth_proof_sig = Sign(
-    signing_key: initiator_static_signing_key,
-    msg:
+  signing_key: initiator_static_signing_key,
+  msg: initiator_auth_proof
+)
+```
+
+Then the initiator creates their full authentication message.
+
+In this message the initiator might want to include an extra 32-byte authenticate payload. If the initiator has no such payload, then the initiator must use 32 bytes of zeros instead.
+
+Initiator:
+
+```txt
+initiator_auth_msg_plaintext = Concat(
+  initiator_auth_proof_sig,
+  initiator_static_verifying_key,
+  initiator_optional_auth_payload
+)
+```
+
+Which looks like:
+
+```txt
+Initiator Authenticate (plaintext): 128-bytes (1024-bits)
++--------------------------------+--------------------------------+---------------------------------+
+| initiator auth proof signature | initiator static verifying key | initiator optional auth payload |
++--------------------------------+--------------------------------+---------------------------------+
+|         64B (512-bits)         |         32B (256-bits)         |         32B (256-bits)          |
++--------------------------------+--------------------------------+---------------------------------+
+```
+
+Then the initiator encrypts this message.
+
+The symmetric key for the encryption combines the current shared knowledge, including shared secrets.
+
+The nonce for the encryption is 24 bytes of zeros.
+
+Initiator:
+
+```txt
+initiator_auth_msg_key = Hash(
+  Concat(
+    network_key,
+    shared_secret_ab,
+    shared_secret_aB,
+    initiator_ephemeral_public_key,
+    responder_ephemeral_public_key
+  )
 )
 
-detached_signature_A = nacl_sign_detached(
-  msg: concat(
-    network_identifier,
-    server_longterm_pk,
-    sha256(shared_secret_ab)
-  ),
-  key: client_longterm_sk
+initiator_auth_msg_ciphertext = Encrypt(
+  key: initiator_auth_msg_key,
+  nonce: 24_bytes_of_zeros,
+  plaintext: initiator_auth_msg_plaintext,
 )
+```
+
+Which looks like:
+
+```txt
+Initiator Authenticate (ciphertext): 144-bytes (1152-bits)
++-------------------------------+----------------+
+|   initiator auth ciphertext   |    auth tag    |
++-------------------------------+----------------+
+|        128B (1024-bits)       | 16B (128-bits) |
++-------------------------------+----------------+
 ```
 
 ### Responder Accept
 
+The responder receives "Initiator Authenticate" and verifies the length of the message is 114 bytes.
+
+Then creates the same symmetric key used for encryption, creating the same shared secrets as necessary:
+
+Responder:
+
+```
+responder_static_secret_key = ConvertSigningEd25519ToSecretX25519(responder_static_signing_key)
+
+shared_secret_aB = DiffieHellman(
+  responder_static_secret_key,
+  initiator_ephemeral_public_key
+)
+
+initiator_auth_msg_key = Hash(
+  Concat(
+    network_key,
+    shared_secret_ab,
+    shared_secret_aB,
+    initiator_ephemeral_public_key,
+    responder_ephemeral_public_key
+  )
+)
+```
+
+
+Then tries to decrypt the message (which will also verify the authentication tag):
+
+(Using the same 24 bytes of zeros as a nonce.)
+
+Responder:
+
+```txt
+initiator_auth_msg_plaintext = Decrypt(
+  key: initiator_auth_msg_key,
+  nonce: 24_bytes_of_zeros,
+  ciphertext: initiator_auth_msg_ciphertext,
+)
+```
+
+Now the responder can deconstruct the Initiator Authenticate message into constituent parts.
+
+```txt
+initiator_auth_proof_sig = initiator_auth_msg_plaintext[0..64]
+initiator_static_verifying_key = initiator_auth_msg_plaintext[64..96]
+initiator_optional_auth_payload = initiator_auth_msg_plaintext[96..128]
+```
 
 
 ### Responder Authenticate
@@ -469,7 +607,7 @@ detached_signature_A = nacl_sign_detached(
 
 ### Post-Handshake Knowledge
 
-### Secret Channel
+## Secret Channel
 
 ## References
 
