@@ -97,6 +97,8 @@ This also follows the advice [on the libsodium scalar multiplication page](https
 >
 > By doing so, each party can prove what exact public key they intended to perform a key exchange with (for a given public key, 11 other public keys producing the same shared secret can be trivially computed).
 
+In an abundance of caution, we also apply the same to the "handshake identifier" in each authentication proof: $`Hash(a ⋅ b)`$ becomes $`Hash(Concat(a ⋅ b, a_p, b_p))`$.
+
 ### Initiator Authenticate Payload
 
 Secret Handshake v2 adds an optional extra 32-byte payload to the Initiator Authenticate message, so an initiator can authenticate to a responder who doesn't recognize their static public key, such as an invite code.
@@ -185,7 +187,7 @@ ConvertSigningEd25519ToSecretX25519(signing_key, msg) -> secret_key
 
 This corresponds to [libsodium's `crypto_sign_ed25519_sk_to_curve25519` function](https://libsodium.gitbook.io/doc/advanced/ed25519-curve25519)
 
-### Sign and SigVerify: [Ed25519](https://datatracker.ietf.org/doc/html/rfc8032)
+### Sign and SignVerify: [Ed25519](https://datatracker.ietf.org/doc/html/rfc8032)
 
 Sign: Given an ED25519 (secret) signing key and a message, return a signature for the message with respect to the signing key.
 
@@ -193,11 +195,15 @@ Sign: Given an ED25519 (secret) signing key and a message, return a signature fo
 Sign(signing_key, msg) -> sig
 ```
 
-SigVerify: Given an ED25519 (public) verifying key, a message, and a signature, return whether the signature is valid for the message with respect to the verifying key.
+SignVerify: Given an ED25519 (public) verifying key, a message, and a signature, return whether the signature is valid for the message with respect to the verifying key.
+
+This corresonds to [libsodium's `crypto_sign_detatched` function](https://doc.libsodium.org/public-key_cryptography/public-key_signatures#example-detached-mode)
 
 ```txt
-SigVerify(verifying_key, msg, sig) -> boolean
+SignVerify(verifying_key, msg, sig) -> boolean
 ```
+
+This corresonds to [libsodium's `crypto_sign_verify_detatched` function](https://doc.libsodium.org/public-key_cryptography/public-key_signatures#example-detached-mode)
 
 ### Encrypt and Decrypt: [ChaCha20-Poly1305](https://datatracker.ietf.org/doc/html/rfc8439)
 
@@ -261,9 +267,9 @@ sequenceDiagram
 1. [Responder Acknowledge](#responder-acknowledge): Responder receives initiatior's ephemeral X25519 public key and checks authentication token (using network key).
 1. [Responder Hello](#responder-hello): Responder sends new ephemeral X22519 public key in cleartext, with an authentication (using key derived from network key and first shared secret).
 1. [Initiator Acknowledge](#initiator-acknowledge): Initiator receives initiator's ephemeral X25519 public key and checks authentication token (using key derived from network key and first shared secret).
-1. [Initiator Authenticate](#initiator-authenticate): Initiator sends own static Ed25519 verifying (public) key and a signature of current state (using own static Ed25519 signing key), encrypted with key derived from network key, both ephemeral public keys, and two shared secrets.
-1. [Responder Accept](#responder-accept): Responder receives and decrypts initiator's static Ed25519 verifying (public) key, signature, and optional payload. Checks signature matches key. Either accepts initiator based on key or based on optional payload.
-1. [Responder Authenticate](#responder-authenticate): Responder sends own static Ed25519 verifying (public) key and a signature of current state (using own static Ed25519 signing key), encrypted with key derived from network key, both ephemeral public keys, and three shared secrets.
+1. [Initiator Authenticate](#initiator-authenticate): Initiator sends own static Ed25519 (public) verifying key and a signature of current state (using own static Ed25519 signing key), encrypted with key derived from network key, both ephemeral public keys, and two shared secrets.
+1. [Responder Accept](#responder-accept): Responder receives and decrypts initiator's static Ed25519 (public) verifying key, signature, and optional payload. Checks signature matches key. Either accepts initiator based on key or based on optional payload.
+1. [Responder Authenticate](#responder-authenticate): Responder sends own static Ed25519 (public) verifying key and a signature of current state (using own static Ed25519 signing key), encrypted with key derived from network key, both ephemeral public keys, and three shared secrets.
 1. [Initiator Accept](#initiator-accept): Initiator receives and decrypts responder's signature. Checks signature matches key.
 1. [Post-Handshake Knowledge](#post-handshake-knowledge): What is known by initiator and responder after the handshake ends
 
@@ -313,11 +319,9 @@ Initiator Hello: 64-bytes (512-bits)
 +----------------------------------+------------------+
 ```
 
-> `Auth` (aka [HMAC](https://en.wikipedia.org/wiki/HMAC)) and `AuthVerify` are functions to tag and verify a message with regards to a secret key. In this case the network identifier (`N`) is used as the secret key.
+> `Auth` (aka [HMAC](https://en.wikipedia.org/wiki/HMAC)) and `AuthVerify` are functions to tag and verify a message with regards to a secret key. In this case the network identifier ($`N`$) is used as the secret key.
 >
 > Both the message creator and verifier have to know the same message and secret key for the verification to succeed, but the secret key is not revealed to an eavesdropper.
->
-> Throughout the protocol, all instances of `Auth` use HMAC-SHA-512-256 (which is the first 256 bits of HMAC-SHA-512).
 
 ### Responder Acknowledge
 
@@ -344,7 +348,18 @@ assert(
 
 The responder then generates the first shared secret.
 
+Responder:
+
+```txt
+shared_secret_ab = DiffieHellman(
+  secret_key: responder_ephemeral_secret_key,
+  public_key: initiator_ephemeral_public_key
+)
+```
+
 > Shared secrets are derived using [Diffie-Hellman scalar multiplication](https://en.wikipedia.org/wiki/Diffie%E2%80%93Hellman_key_exchange).
+>
+> Alice and Bob both send each other their public key.
 >
 > If Alice combines her secret key with Bob's public key,
 >
@@ -354,18 +369,9 @@ The responder then generates the first shared secret.
 >
 > They will end up with the same shared secret.
 >
-> And meanwhile, someone could be eavesdropping on the entire conversation and not be able to come up with the same shared secret.
+> And meanwhile, Mallory, who hears everything, is not able to come up with the same shared secret.
 >
 > Mathemagic!
-
-Responder:
-
-```txt
-shared_secret_ab = DiffieHellman(
-  secret_key: responder_ephemeral_secret_key,
-  public_key: initiator_ephemeral_public_key
-)
-```
 
 ### Responder Hello
 
@@ -376,7 +382,7 @@ The responder generates a new ephemeral public and secret keypair.
 Then sends "Responder Hello": a message which combines:
 
 - proof that the initiator knows the network key,
-- and the initiators new ephemeral public key
+- and the initiator's new ephemeral public key
 
 Responder:
 
@@ -451,33 +457,25 @@ assert(
 
 Now it's time for the initiator to authenticate themself to the responder.
 
-> Because the initiator already knows the responder's static Ed25519 verifying (public) key $`B_p`$, both can derive a second secret using the initiator's ephemeral key pair (either the public or the secret key) and the responder's static key pair (respectively either the secret or private key) that will allow the initiator to send a message that only the real responder can read and not a man-in-the-middle.
+> Because the initiator already knows the responder's static Ed25519 (public) verifying key $`B_p`$, both can derive a second secret using the initiator's ephemeral key pair (either the public or the secret key) and the responder's static key pair (respectively either the secret or private key) that will allow the initiator to send a message that only the real responder can read and not a man-in-the-middle.
 
-First,
-
-- they convert the responder's static Ed25519 verifying (public) key $`B_p`$ to a static X25519 public key,
-- then, they compute the second shared secret ($`a ⋅ B`$).
+First, the initiator creates an authentication proof:
 
 Initiator:
 
 ```txt
-responder_static_public_key = ConvertVerifyingEd25519ToPublicX25519(responder_static_verifying_key)
-
-shared_secret_aB = DiffieHellman(
-  initiator_ephemeral_secret_key,
-  responder_static_public_key
+handshake_id = Hash(
+  Concat(
+    shared_secret_ab,
+    initiator_ephemeral_public_key,
+    responder_ephemeral_public_key
+  )
 )
-```
 
-The initiator creates an authentication proof:
-
-Initiator:
-
-```txt
 initiator_auth_proof = Concat(
   network_key,
   responder_static_verifying_key,
-  Hash(shared_secret_ab),
+  handshake_id,
 )
 ```
 
@@ -485,11 +483,11 @@ Which looks like:
 
 ```txt
 Initiator Authenticate Proof: 96-bytes (768-bits)
-+------------------+--------------------------------+------------------------+
-|   network key    | responder static verifying key | Hash(shared_secret_ab) |
-+------------------+--------------------------------+------------------------+
-|  32B (256-bits)  |         32B (256-bits)         |      32B (256-bits)    |
-+------------------+--------------------------------+------------------------+
++------------------+--------------------------------+--------------------+
+|   network key    | responder static verifying key |    handshake id    |
++------------------+--------------------------------+--------------------+
+|  32B (256-bits)  |         32B (256-bits)         |   32B (256-bits)   |
++------------------+--------------------------------+--------------------+
 ```
 
 Which is then signed.
@@ -530,9 +528,27 @@ Initiator Authenticate (plaintext): 128-bytes (1024-bits)
 
 Then the initiator encrypts this message.
 
+To do this,
+
+- they convert the responder's static Ed25519 (public) verifying key $`B_p`$ to a static X25519 public key,
+- then, they compute the second shared secret ($`a ⋅ B`$).
+
+Initiator:
+
+```txt
+shared_secret_aB = DiffieHellman(
+  secret_key: initiator_ephemeral_secret_key,
+  public_key: ConvertVerifyingEd25519ToPublicX25519(
+    responder_static_verifying_key
+  )
+)
+```
+
 The symmetric key for the encryption combines the current shared knowledge, including shared secrets $`a ⋅ b`$ and $`a ⋅ B`$.
 
 The nonce for the encryption is 24 bytes of zeros.
+
+> An all-zero nonce is used for the symmetric encryption. The encryption cipher requires that you must NEVER re-use the same (key, nonce) pair. It’s important to get this detail right because reusing a nonce will allow an attacker to recover the key and encrypt or decrypt anything using that key. Using a zero nonce is allowed here because this is the only secret box that ever uses the key: Hash(Concat($`N`$, $`a ⋅ b`$, $`a ⋅ B`$)).
 
 Initiator:
 
@@ -567,20 +583,20 @@ Initiator Authenticate (ciphertext): 144-bytes (1152-bits)
 
 ### Responder Accept
 
-> The initiator reveals their identity to the responder by sending their static Ed25519 verifying (public) key. The initiator also makes a signature using their static Ed25519 verifying (public) key. By signing the keys used earlier in the handshake the initiator proves their identity and confirms that they do indeed wish to be part of this handshake.
+> The initiator reveals their identity to the responder by sending their static Ed25519 (public) verifying key. The initiator also makes a signature using their static Ed25519 (public) verifying key. By signing the keys used earlier in the handshake the initiator proves their identity and confirms that they do indeed wish to be part of this handshake.
 
 The responder receives "Initiator Authenticate" and verifies the length of the message is 144 bytes.
 
-Then creates the same symmetric key used for encryption, creating the $`a ⋅ B`$ shared secret as necessary:
+Then creates the same symmetric key used for encryption, in the process creating the $`a ⋅ B`$ shared secret:
 
 Responder:
 
 ```
-responder_static_secret_key = ConvertSigningEd25519ToSecretX25519(responder_static_signing_key)
-
 shared_secret_aB = DiffieHellman(
-  responder_static_secret_key,
-  initiator_ephemeral_public_key
+  secret_key: ConvertSigningEd25519ToSecretX25519(
+    responder_static_signing_key
+  ),
+  public_key: initiator_ephemeral_public_key
 )
 
 initiator_auth_msg_key = Hash(
@@ -626,14 +642,22 @@ Then generate the signed proof and verify the signature is correct:
 Responder:
 
 ```txt
+handshake_id = Hash(
+  Concat(
+    shared_secret_ab,
+    initiator_ephemeral_public_key,
+    responder_ephemeral_public_key
+  )
+)
+
 initiator_auth_proof = Concat(
   network_key,
   responder_static_verifying_key,
-  Hash(shared_secret_ab),
+  handshake_id
 )
 
 assert(
-  SigVerify(
+  SignVerify(
     key: initiator_static_verifying_key,
     msg: initiator_auth_proof,
     sig: initiator_auth_proof_sig
@@ -641,12 +665,181 @@ assert(
 )
 ```
 
-This confirms
+> This confirms:
+>
+> - The initiator's identity is the same as the static (public) verifying key they sent,
+> - And the initiator has pre-handshake knowledge of the responder's identity.
 
+Now the responder may choose whether or not to accept the initiator.
+
+> The acceptance can be seen as [Capability Based Security](https://en.wikipedia.org/wiki/Capability-based_security):
+>
+> - The initiator's identity, as a capability,
+> - Or, the initiator's optional payload, as a capability.
+>
+> One of these capabilities may grant the initiator access to the responder. Or not.
+
+If the responder doesn't accept the initiator, they close the connection and the handshake ends.
+
+> To maximize security, the process of checking whether the initiator is accepted or not, should take a constant amount of time, regardless of whether they are authentic and have the desired capability.
+
+If the responder does accept the initiator, they continue with the next step.
 
 ### Responder Authenticate
 
+Now it's time for the responder to authenticate themself to the initiator.
+
+First, the responder creates an authentication proof:
+
+Responder:
+
+```txt
+responder_auth_proof = Concat(
+  network_key,
+  initiator_auth_proof_sig,
+  initiator_static_verifying_key,
+  handshake_id
+)
+```
+
+Which looks like:
+
+```txt
+Responder Authenticate Proof: 160-bytes (1280-bits)
++------------------+--------------------------+--------------------------------+--------------------+
+|   network key    | initiator auth proof sig | responder static verifying key |    handshake id    |
++------------------+--------------------------+--------------------------------+--------------------+
+|  32B (256-bits)  |      64B (512-bits)      |         32B (256-bits)         |   32B (256-bits)   |
++------------------+--------------------------+--------------------------------+--------------------+
+```
+
+Which is then signed.
+
+Responder:
+
+```txt
+responder_auth_proof_sig = Sign(
+  signing_key: responder_static_signing_key,
+  msg: responder_auth_proof
+)
+```
+
+Then the responder encrypts their signature, to become their authentication message.
+
+To do this,
+
+- they convert the initiator's static Ed25519 (public) verifying key $`A_p`$ to a static X25519 public key,
+- then, they compute the third shared secret ($`A ⋅ b`$).
+
+Responder:
+
+```txt
+shared_secret_Ab = DiffieHellman(
+  secret_key: responder_ephemeral_secret_key,
+  public_key: ConvertVerifyingEd25519ToPublicX25519(
+    initiator_static_verifying_key
+  )
+)
+```
+
+The symmetric key for the encryption combines the current shared knowledge, including shared secrets $`a ⋅ b`$, $`a ⋅ B`$, and $`A ⋅ b`$.
+
+The nonce for the encryption is again, 24 bytes of zeros. (Only because this key will never be used again.)
+
+Responder:
+
+```txt
+responder_auth_msg_key = Hash(
+  Concat(
+    network_key,
+    shared_secret_ab,
+    shared_secret_aB,
+    shared_secret_AB,
+    initiator_ephemeral_public_key,
+    responder_ephemeral_public_key
+  )
+)
+
+responder_auth_msg_ciphertext = Encrypt(
+  key: responder_auth_msg_key,
+  nonce: 24_bytes_of_zeros,
+  plaintext: responder_auth_proof_sig,
+)
+```
+
+Which looks like:
+
+```txt
+Initiator Authenticate (ciphertext): 80-bytes (640-bits)
++--------------------------+----------------+
+| responder sig ciphertext |    auth tag    |
++--------------------------+----------------+
+|      64B (512-bits)      | 16B (128-bits) |
++--------------------------+----------------+
+```
+
 ### Initiator Accept
+
+The initiator receives "Responder Authenticate" and verifies the length of the message is 80 bytes.
+
+Then creates the same symmetric key used for encryption, in the process creating the $`A ⋅ b`$ shared secret:
+
+Initiator:
+
+```txt
+shared_secret_Ab = DiffieHellman(
+  secret_key: ConvertSigningEd25519ToSecretX25519(
+    initiator_static_signing_key
+  ),
+  responder_ephemeral_public_key,
+)
+
+responder_auth_msg_key = Hash(
+  Concat(
+    network_key,
+    shared_secret_ab,
+    shared_secret_aB,
+    shared_secret_Ab,
+    initiator_ephemeral_public_key,
+    responder_ephemeral_public_key
+  )
+)
+```
+
+Then tries to decrypt the message (which will also verify the authentication tag).
+
+(Using the same 24 bytes of zeros as a nonce.)
+
+Initiator:
+
+```txt
+responder_auth_proof_sig = Decrypt(
+  key: responder_auth_msg_key,
+  nonce: 24_bytes_of_zeros,
+  ciphertext: responder_auth_msg_ciphertext,
+)
+```
+
+Now the initiator can generate the signed proof and verify the signature is correct:
+
+Initiator:
+
+```txt
+responder_auth_proof = Concat(
+  network_key,
+  initiator_auth_proof_sig,
+  initiator_static_verifying_key,
+  handshake_id
+)
+
+assert(
+  SignVerify(
+    key: responder_static_verifying_key,
+    msg: responder_auth_proof,
+    sig: responder_auth_proof_sig
+  )
+)
+```
 
 ### Post-Handshake Knowledge
 
