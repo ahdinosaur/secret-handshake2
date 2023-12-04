@@ -101,7 +101,7 @@ In an abundance of caution, we also apply the same to the "handshake identifier"
 
 ### Initiator Authenticate Payload
 
-Secret Handshake v2 adds an optional extra 32-byte payload to the Initiator Authenticate message, so an initiator can authenticate to a responder who doesn't recognize their static public key, such as an invite code.
+Secret Handshake v2 adds an extra 32-byte payload to the Initiator Authenticate message, so an initiator can authenticate to a responder who doesn't recognize their static public key, such as an invite code. The contents of this payload are optional, meaning that 32 zero bytes should be considered "no payload" while any other case is interpreted as an initiator authenticate payload.
 
 ## Functions
 
