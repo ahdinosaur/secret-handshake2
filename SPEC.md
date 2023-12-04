@@ -36,7 +36,7 @@ Mutually authenticating key agreement to establish shared secrets over an insecu
 For authenticated encryption,
 
 - v1 uses [libsodium's `crypto_secretbox_easy`](https://libsodium.gitbook.io/doc/secret-key_cryptography/secretbox)
-  - This uses XSalsa20-Poly1305 and concatentates in the order of (auth_tag, ciphertext).
+  - This uses XSalsa20-Poly1305 and concatenates in the order of (auth_tag, ciphertext).
 - v2 uses the [IETF variant of ChaCha20-Poly1305](https://datatracker.ietf.org/doc/html/rfc8439)
   - Corresponds to [libsodium's `crypto_aead_xchacha20poly1305_ietf_encrypt`](https://libsodium.gitbook.io/doc/secret-key_cryptography/aead/chacha20-poly1305/ietf_chacha20-poly1305_construction)
   - This is a more recent cipher and concatenates in the order of (ciphertext, auth_tag).
