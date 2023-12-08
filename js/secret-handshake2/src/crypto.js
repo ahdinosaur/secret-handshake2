@@ -16,7 +16,7 @@ module.exports = {
 }
 
 /**
- * @typedef {Buffer | Uint8Array} B4A
+ * @typedef {import('./types').B4A} B4A
  * @typedef {{ publicKey: B4A, secretKey: B4A }} X25519Keypair
  */
 
@@ -42,12 +42,12 @@ function auth(input, key) {
 }
 
 /**
- * @param {B4A} output
  * @param {B4A} input
  * @param {B4A} key
+ * @param {B4A} output
  * @returns boolean
  */
-function authVerify(output, input, key) {
+function authVerify(input, key, output) {
   return sodium.crypto_auth_verify(output, input, key)
 }
 
