@@ -127,7 +127,6 @@ function signVerify(verifyingEd25519Key, msg, sig) {
   return sodium.crypto_sign_verify_detached(sig, msg, verifyingEd25519Key)
 }
 
-
 /**
  * @param {B4A} key
  * @param {B4A} nonce
@@ -148,7 +147,14 @@ function encrypt(key, nonce, plaintext) {
  */
 function decrypt(key, nonce, ciphertext) {
   const plaintext = b4a.alloc(ciphertext.length - sodium.crypto_aead_chacha20poly1305_ietf_ABYTES)
-  const decryptedBytes = sodium.crypto_aead_chacha20poly1305_ietf_decrypt(plaintext, null, ciphertext, null, nonce, key)
+  const decryptedBytes = sodium.crypto_aead_chacha20poly1305_ietf_decrypt(
+    plaintext,
+    null,
+    ciphertext,
+    null,
+    nonce,
+    key,
+  )
   if (decryptedBytes !== 0) return plaintext
   else return null
 }

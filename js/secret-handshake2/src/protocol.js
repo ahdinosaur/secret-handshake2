@@ -2,6 +2,18 @@ const b4a = require('b4a')
 
 /**
  * @typedef {import('./types').B4A} B4A
+ * @typedef {import('./types').InitiatorPreKnowledgeState} InitiatorPreKnowledgeState
+ * @typedef {import('./types').InitiatorHelloState} InitiatorHelloState
+ * @typedef {import('./types').ResponderPreKnowledgeState} ResponderPreKnowledgeState
+ * @typedef {import('./types').ResponderAcknowledgeState} ResponderAcknowledgeState
+ * @typedef {import('./types').ResponderHelloState} ResponderHelloState
+ * @typedef {import('./types').InitiatorAcknowledgeState} InitiatorAcknowledgeState
+ * @typedef {import('./types').InitiatorAuthenticateState} InitiatorAuthenticateState
+ * @typedef {import('./types').ResponderAcceptState} ResponderAcceptState
+ * @typedef {import('./types').ResponderAuthenticateState} ResponderAuthenticateState
+ * @typedef {import('./types').InitiatorAcceptState} InitiatorAcceptState
+ * @typedef {import('./types').PostKnowledgeState} PostKnowledgeState
+ *
  * @typedef {import('./crypto')} SecretHandshakeCrypto
  */
 
@@ -13,28 +25,19 @@ module.exports = protocol
 function protocol(crypto) {
   return {
     initiatorHello: initiatorHello.bind(null, crypto),
+    responderAcknowledge: responderAcknowledge.bind(null, crypto),
+    responderHello: responderHello.bind(null, crypto),
+    initiatorAcknowledge: initiatorAcknowledge.bind(null, crypto),
+    initiatorAuthenticate: initiatorAuthenticate.bind(null, crypto),
+    responderAccept: responderAccept.bind(null, crypto),
+    responderAuthenticate: responderAuthenticate.bind(null, crypto),
+    initiatorAccept: initiatorAccept.bind(null, crypto),
   }
 }
 
 /**
- * @typedef {{
- *   networkKey: B4A,
- *   initiatorStaticSecretEd25519Key: B4A,
- *   initiatorStaticPublicEd25519Key: B4A,
- *   responderStaticPublicEd25519Key: B4A,
- * }} InitiatorPreKnowledge
- */
-
-/**
- * @typedef {InitiatorPreKnowledge & {
- *   initiatorEphemeralSecretX25519Key: B4A,
- *   initiatorEphemeralPublicX25519Key: B4A,
- * }} InitiatorHelloState
- */
-
-/**
  * @param {SecretHandshakeCrypto} crypto
- * @param {InitiatorPreKnowledge} prevState
+ * @param {InitiatorPreKnowledgeState} prevState
  * @returns {{
  *   state: InitiatorHelloState
  *   msg: B4A,
@@ -54,35 +57,18 @@ function initiatorHello(crypto, prevState) {
     initiatorEphemeralPublicX25519Key,
   }
 
+  const initiatorHelloMsgKey = networkKey
   const msg = b4a.concat([
     initiatorEphemeralPublicX25519Key,
-    crypto.auth(
-      networkKey,
-      initiatorEphemeralPublicX25519Key,
-    )
+    crypto.auth(initiatorEphemeralPublicX25519Key, initiatorHelloMsgKey),
   ])
 
   return { state, msg }
 }
 
-
-/**
- * @typedef {{
- *   networkKey: B4A,
- *   responderStaticSecretEd25519Key: B4A,
- *   responderStaticPublicEd25519Key: B4A,
- * }} ResponderPreKnowledge
- */
-
-/**
- * @typedef {ResponderPreKnowledge & {
- *   initiatorEphemeralPublicX25519Key: B4A,
- * }} ResponderAcknowledgeState
- */
-
 /**
  * @param {SecretHandshakeCrypto} crypto
- * @param {ResponderPreKnowledge} prevState
+ * @param {ResponderPreKnowledgeState} prevState
  * @param {B4A} initiatorHelloMsg
  * @returns ResponderAcknowledgeState
  */
@@ -96,9 +82,10 @@ function responderAcknowledge(crypto, prevState, initiatorHelloMsg) {
 
   const { networkKey } = prevState
 
+  const initiatorHelloMsgKey = networkKey
   const isAuthentic = crypto.authVerify(
-    networkKey,
     initiatorEphemeralPublicX25519Key,
+    initiatorHelloMsgKey,
     initiatorHelloMsgAuthTag,
   )
 
@@ -115,14 +102,6 @@ function responderAcknowledge(crypto, prevState, initiatorHelloMsg) {
 }
 
 /**
- * @typedef {ResponderAcknowledgeState & {
- *   responderEphemeralSecretX25519Key: B4A,
- *   responderEphemeralPublicX25519Key: B4A,
- *   sharedSecretInitiatorEphemeralResponderEphemeral: B4A
- * }} ResponderHelloState
- */
-
-/**
  * @param {SecretHandshakeCrypto} crypto
  * @param {ResponderAcknowledgeState} prevState
  * @returns {{
@@ -131,7 +110,7 @@ function responderAcknowledge(crypto, prevState, initiatorHelloMsg) {
  * }}
  */
 function responderHello(crypto, prevState) {
-  const { initiatorEphemeralPublicX25519Key } = prevState
+  const { networkKey, initiatorEphemeralPublicX25519Key } = prevState
 
   const {
     secretKey: responderEphemeralSecretX25519Key,
@@ -143,5 +122,64 @@ function responderHello(crypto, prevState) {
     initiatorEphemeralPublicX25519Key,
   )
 
+  const state = {
+    ...prevState,
+    responderEphemeralSecretX25519Key,
+    responderEphemeralPublicX25519Key,
+    sharedSecretInitiatorEphemeralResponderEphemeral,
+  }
+
+  const responderHelloMsgKey = crypto.hash(
+    b4a.concat([networkKey, sharedSecretInitiatorEphemeralResponderEphemeral]),
+  )
+  const msg = b4a.concat([
+    responderEphemeralPublicX25519Key,
+    crypto.auth(responderEphemeralPublicX25519Key, responderHelloMsgKey),
+  ])
+
   return { state, msg }
+}
+
+/**
+ * @param {SecretHandshakeCrypto} crypto
+ * @param {InitiatorHelloState} prevState
+ * @param {B4A} responderHelloMsg
+ * @returns InitiatorAcknowledgeState
+ */
+function initiatorAcknowledge(crypto, prevState, responderHelloMsg) {
+  if (responderHelloMsg.length !== 64) {
+    throw new Error('InitiatorAcknowledge: ResponderHelloMsg.length !== 64 bytes')
+  }
+
+  const responderEphemeralPublicX25519Key = responderHelloMsg.subarray(0, 32)
+  const responderHelloMsgAuthTag = responderHelloMsg.subarray(32, 64)
+
+  const { networkKey, initiatorEphemeralSecretX25519Key } = prevState
+
+  const sharedSecretInitiatorEphemeralResponderEphemeral = crypto.diffieHellman(
+    initiatorEphemeralSecretX25519Key,
+    responderEphemeralPublicX25519Key,
+  )
+
+  const responderHelloMsgKey = crypto.hash(
+    b4a.concat([networkKey, sharedSecretInitiatorEphemeralResponderEphemeral]),
+  )
+
+  const isAuthentic = crypto.authVerify(
+    responderEphemeralPublicX25519Key,
+    responderHelloMsgKey,
+    responderHelloMsgAuthTag,
+  )
+
+  if (!isAuthentic) {
+    throw new Error('InitiatorAcknowledge: ResponderHelloMsg auth tag is invalid')
+  }
+
+  const state = {
+    ...prevState,
+    responderEphemeralPublicX25519Key,
+    sharedSecretInitiatorEphemeralResponderEphemeral,
+  }
+
+  return state
 }
