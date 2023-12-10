@@ -71,7 +71,7 @@ function initiatorHello(crypto, prevState) {
  * @param {SecretHandshakeCrypto} crypto
  * @param {ResponderPreKnowledgeState} prevState
  * @param {B4A} initiatorHelloMsg
- * @returns ResponderAcknowledgeState
+ * @returns {ResponderAcknowledgeState}
  */
 function responderAcknowledge(crypto, prevState, initiatorHelloMsg) {
   if (initiatorHelloMsg.length !== 64) {
@@ -144,7 +144,7 @@ function responderHello(crypto, prevState) {
  * @param {SecretHandshakeCrypto} crypto
  * @param {InitiatorHelloState} prevState
  * @param {B4A} responderHelloMsg
- * @returns InitiatorAcknowledgeState
+ * @returns {InitiatorAcknowledgeState}
  */
 function initiatorAcknowledge(crypto, prevState, responderHelloMsg) {
   if (responderHelloMsg.length !== 64) {
@@ -175,13 +175,11 @@ function initiatorAcknowledge(crypto, prevState, responderHelloMsg) {
     throw new Error('InitiatorAcknowledge: ResponderHelloMsg auth tag is invalid')
   }
 
-  const state = {
+  return {
     ...prevState,
     responderEphemeralPublicX25519Key,
     sharedSecretInitiatorEphemeralResponderEphemeral,
   }
-
-  return state
 }
 
 /**
@@ -201,7 +199,7 @@ function initiatorAuthenticate(crypto, prevState) {
     responderStaticVerifyingEd25519Key,
     initiatorStaticSigningEd25519Key,
     initiatorStaticVerifyingEd25519Key,
-    initiatorAuthenticationPayload,
+    initiatorAuthPayload,
     initiatorEphemeralSecretX25519Key,
   } = prevState
 
@@ -224,7 +222,7 @@ function initiatorAuthenticate(crypto, prevState) {
   const initiatorAuthMsgPlaintext = b4a.concat([
     initiatorAuthProofSig,
     initiatorStaticVerifyingEd25519Key,
-    initiatorAuthenticationPayload ?? b4a.alloc(32, 0),
+    initiatorAuthPayload ?? b4a.alloc(32, 0),
   ])
 
   const responderStaticPublicX25519Key = crypto.convertVerifyingEd25519ToPublicX25519(
@@ -261,6 +259,7 @@ function initiatorAuthenticate(crypto, prevState) {
       ...prevState,
       handshakeId,
       sharedSecretInitiatorEphemeralResponderStatic,
+      initiatorAuthProofSig,
     },
     msg: initiatorAuthMsgCiphertext,
   }
@@ -270,11 +269,11 @@ function initiatorAuthenticate(crypto, prevState) {
  * @param {SecretHandshakeCrypto} crypto
  * @param {ResponderHelloState} prevState
  * @param {B4A} initiatorAuthMsgCiphertext
- * @returns ResponderAcceptState
+ * @returns {ResponderAcceptState}
  */
 function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
   if (initiatorAuthMsgCiphertext.length !== 144) {
-    throw new Error('ResponderAccept: InitaitorAuthenticateMsgCiphertext.length !== 144 bytes')
+    throw new Error('ResponderAccept: InitiatorAuthMsgCiphertext.length !== 144 bytes')
   }
 
   const {
@@ -315,15 +314,15 @@ function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
     initiatorAuthMsgCiphertext,
   )
   if (initiatorAuthMsgPlaintext == null) {
-    throw new Error('ResponderAccept: InitiatorAuthMsg failed to decrypt')
+    throw new Error('ResponderAccept: InitiatorAuthMsgCiphertext failed to decrypt')
   }
   if (initiatorAuthMsgPlaintext.length !== 128) {
-    throw new Error('ResponderAccept: InitaitorAuthenticateMsgPlaintext.length !== 128 bytes')
+    throw new Error('ResponderAccept: InitiatorAuthMsgPlaintext.length !== 128 bytes')
   }
 
   const initiatorAuthProofSig = initiatorAuthMsgPlaintext.subarray(0, 64)
   const initiatorStaticVerifyingEd25519Key = initiatorAuthMsgPlaintext.subarray(64, 96)
-  const initiatorAuthenticationPayload = initiatorAuthMsgPlaintext.subarray(96, 128)
+  const initiatorAuthPayload = initiatorAuthMsgPlaintext.subarray(96, 128)
 
   const handshakeId = crypto.hash(
     b4a.concat([
@@ -345,7 +344,7 @@ function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
     initiatorAuthProofSig,
   )
   if (!isValidSignature) {
-    throw new Error('ResponderAccept: InitiatorAUthMsg signature is invalid')
+    throw new Error('ResponderAccept: InitiatorAuthMsg signature is invalid')
   }
 
   return {
@@ -353,6 +352,160 @@ function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
     sharedSecretInitiatorEphemeralResponderStatic,
     handshakeId,
     initiatorStaticVerifyingEd25519Key,
-    initiatorAuthenticationPayload,
+    initiatorAuthPayload,
+    initiatorAuthProofSig,
+  }
+}
+
+/**
+ * @param {SecretHandshakeCrypto} crypto
+ * @param {ResponderAcceptState} prevState
+ * @returns {{
+ *   state: ResponderAuthenticateState,
+ *   msg: B4A,
+ * }}
+ */
+function responderAuthenticate(crypto, prevState) {
+  const {
+    networkKey,
+    initiatorAuthProofSig,
+    initiatorStaticVerifyingEd25519Key,
+    handshakeId,
+    responderStaticSigningEd25519Key,
+    responderEphemeralSecretX25519Key,
+    sharedSecretInitiatorEphemeralResponderEphemeral,
+    sharedSecretInitiatorEphemeralResponderStatic,
+    initiatorEphemeralPublicX25519Key,
+    responderEphemeralPublicX25519Key,
+  } = prevState
+
+  const responderAuthProof = b4a.concat([
+    networkKey,
+    initiatorAuthProofSig,
+    initiatorStaticVerifyingEd25519Key,
+    handshakeId,
+  ])
+  const responderAuthProofSig = crypto.sign(responderStaticSigningEd25519Key, responderAuthProof)
+  const responderAuthMsgPlaintext = responderAuthProofSig
+
+  const initiatorStaticPublicX25519Key = crypto.convertVerifyingEd25519ToPublicX25519(
+    initiatorStaticVerifyingEd25519Key,
+  )
+  if (initiatorStaticPublicX25519Key == null) {
+    throw new Error(
+      'ResponderAuthenticate: Initiator static verifying ed25519 key failed to convert to public x25519 key',
+    )
+  }
+  const sharedSecretInitiatorStaticResponderEphemeral = crypto.diffieHellman(
+    responderEphemeralSecretX25519Key,
+    initiatorStaticPublicX25519Key,
+  )
+
+  const responderAuthMsgKey = crypto.hash(
+    b4a.concat([
+      networkKey,
+      sharedSecretInitiatorEphemeralResponderEphemeral,
+      sharedSecretInitiatorEphemeralResponderStatic,
+      sharedSecretInitiatorStaticResponderEphemeral,
+      initiatorEphemeralPublicX25519Key,
+      responderEphemeralPublicX25519Key,
+    ]),
+  )
+
+  const responderAuthMsgCiphertext = crypto.encrypt(
+    responderAuthMsgKey,
+    b4a.alloc(24, 0),
+    responderAuthMsgPlaintext,
+  )
+
+  return {
+    state: {
+      ...prevState,
+      sharedSecretInitiatorStaticResponderEphemeral,
+    },
+    msg: responderAuthMsgCiphertext,
+  }
+}
+
+/**
+ * @param {SecretHandshakeCrypto} crypto
+ * @param {InitiatorAuthenticateState} prevState
+ * @param {B4A} responderAuthMsgCiphertext
+ * @returns {InitiatorAcceptState}
+ */
+function initiatorAccept(crypto, prevState, responderAuthMsgCiphertext) {
+  if (responderAuthMsgCiphertext.length !== 80) {
+    throw new Error('InitiatorAccept: ResponderAuthMsgCiphertext.length !== 80 bytes')
+  }
+
+  const {
+    initiatorStaticSigningEd25519Key,
+    responderEphemeralPublicX25519Key,
+    networkKey,
+    sharedSecretInitiatorEphemeralResponderEphemeral,
+    sharedSecretInitiatorEphemeralResponderStatic,
+    initiatorEphemeralPublicX25519Key,
+    initiatorAuthProofSig,
+    initiatorStaticVerifyingEd25519Key,
+    handshakeId,
+    responderStaticVerifyingEd25519Key,
+  } = prevState
+
+  const initiatorStaticSecretX25519Key = crypto.convertSigningEd25519ToSecretX25519(
+    initiatorStaticSigningEd25519Key,
+  )
+  if (initiatorStaticSecretX25519Key == null) {
+    throw new Error(
+      'InitiatorAccept: Initiator static signing ed25519 key failed to convert to secret x25519 key',
+    )
+  }
+  const sharedSecretInitiatorStaticResponderEphemeral = crypto.diffieHellman(
+    initiatorStaticSecretX25519Key,
+    responderEphemeralPublicX25519Key,
+  )
+
+  const responderAuthMsgKey = crypto.hash(
+    b4a.concat([
+      networkKey,
+      sharedSecretInitiatorEphemeralResponderEphemeral,
+      sharedSecretInitiatorEphemeralResponderStatic,
+      sharedSecretInitiatorStaticResponderEphemeral,
+      initiatorEphemeralPublicX25519Key,
+      responderEphemeralPublicX25519Key,
+    ]),
+  )
+
+  const responderAuthMsgPlaintext = crypto.decrypt(
+    responderAuthMsgKey,
+    b4a.alloc(24, 0),
+    responderAuthMsgCiphertext,
+  )
+  if (responderAuthMsgPlaintext == null) {
+    throw new Error('ResponderAccept: ResponderAuthMsgCiphertext failed to decrypt')
+  }
+  if (responderAuthMsgPlaintext.length !== 64) {
+    throw new Error('ResponderAccept: ResponderAuthMsgPlaintext.length !== 64 bytes')
+  }
+
+  const responderAuthProofSig = responderAuthMsgPlaintext
+  const responderAuthProof = b4a.concat([
+    networkKey,
+    initiatorAuthProofSig,
+    initiatorStaticVerifyingEd25519Key,
+    handshakeId,
+  ])
+
+  const isValidSignature = crypto.signVerify(
+    responderStaticVerifyingEd25519Key,
+    responderAuthProof,
+    responderAuthProofSig,
+  )
+  if (!isValidSignature) {
+    throw new Error('ResponderAccept: ResponderAuthMsg signature is invalid')
+  }
+
+  return {
+    ...prevState,
+    sharedSecretInitiatorStaticResponderEphemeral,
   }
 }
