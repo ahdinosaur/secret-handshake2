@@ -1,5 +1,14 @@
 const b4a = require('b4a')
 
+const {
+  INITIATOR_HELLO_LENGTH,
+  RESPONDER_HELLO_LENGTH,
+  INITIATOR_AUTHENTICATE_PLAINTEXT_LENGTH,
+  INITIATOR_AUTHENTICATE_CIPHERTEXT_LENGTH,
+  RESPONDER_AUTHENTICATE_PLAINTEXT_LENGTH,
+  RESPONDER_AUTHENTICATE_CIPHERTEXT_LENGTH,
+} = require('./constants')
+
 /**
  * @typedef {import('./types').B4A} B4A
  * @typedef {import('./types').InitiatorPreKnowledgeState} InitiatorPreKnowledgeState
@@ -32,6 +41,7 @@ function protocol(crypto) {
     responderAccept: responderAccept.bind(null, crypto),
     responderAuthenticate: responderAuthenticate.bind(null, crypto),
     initiatorAccept: initiatorAccept.bind(null, crypto),
+    postKnowledge: postKnowledge.bind(null, crypto),
   }
 }
 
@@ -74,8 +84,10 @@ function initiatorHello(crypto, prevState) {
  * @returns {ResponderAcknowledgeState}
  */
 function responderAcknowledge(crypto, prevState, initiatorHelloMsg) {
-  if (initiatorHelloMsg.length !== 64) {
-    throw new Error('ResponderAcknowledge: InitiatorHelloMsg.length !== 64 bytes')
+  if (initiatorHelloMsg.length !== INITIATOR_HELLO_LENGTH) {
+    throw new Error(
+      `ResponderAcknowledge: InitiatorHelloMsg.length !== ${INITIATOR_HELLO_LENGTH} bytes`,
+    )
   }
 
   const initiatorEphemeralPublicX25519Key = initiatorHelloMsg.subarray(0, 32)
@@ -147,8 +159,10 @@ function responderHello(crypto, prevState) {
  * @returns {InitiatorAcknowledgeState}
  */
 function initiatorAcknowledge(crypto, prevState, responderHelloMsg) {
-  if (responderHelloMsg.length !== 64) {
-    throw new Error('InitiatorAcknowledge: ResponderHelloMsg.length !== 64 bytes')
+  if (responderHelloMsg.length !== RESPONDER_HELLO_LENGTH) {
+    throw new Error(
+      `InitiatorAcknowledge: ResponderHelloMsg.length !== ${RESPONDER_HELLO_LENGTH} bytes`,
+    )
   }
 
   const responderEphemeralPublicX25519Key = responderHelloMsg.subarray(0, 32)
@@ -272,8 +286,10 @@ function initiatorAuthenticate(crypto, prevState) {
  * @returns {ResponderAcceptState}
  */
 function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
-  if (initiatorAuthMsgCiphertext.length !== 144) {
-    throw new Error('ResponderAccept: InitiatorAuthMsgCiphertext.length !== 144 bytes')
+  if (initiatorAuthMsgCiphertext.length !== INITIATOR_AUTHENTICATE_CIPHERTEXT_LENGTH) {
+    throw new Error(
+      `ResponderAccept: InitiatorAuthMsgCiphertext.length !== ${INITIATOR_AUTHENTICATE_CIPHERTEXT_LENGTH} bytes`,
+    )
   }
 
   const {
@@ -316,8 +332,10 @@ function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
   if (initiatorAuthMsgPlaintext == null) {
     throw new Error('ResponderAccept: InitiatorAuthMsgCiphertext failed to decrypt')
   }
-  if (initiatorAuthMsgPlaintext.length !== 128) {
-    throw new Error('ResponderAccept: InitiatorAuthMsgPlaintext.length !== 128 bytes')
+  if (initiatorAuthMsgPlaintext.length !== INITIATOR_AUTHENTICATE_PLAINTEXT_LENGTH) {
+    throw new Error(
+      `ResponderAccept: InitiatorAuthMsgPlaintext.length !== ${INITIATOR_AUTHENTICATE_PLAINTEXT_LENGTH} bytes`,
+    )
   }
 
   const initiatorAuthProofSig = initiatorAuthMsgPlaintext.subarray(0, 64)
@@ -422,6 +440,7 @@ function responderAuthenticate(crypto, prevState) {
     state: {
       ...prevState,
       sharedSecretInitiatorStaticResponderEphemeral,
+      responderAuthMsgKey,
     },
     msg: responderAuthMsgCiphertext,
   }
@@ -434,8 +453,10 @@ function responderAuthenticate(crypto, prevState) {
  * @returns {InitiatorAcceptState}
  */
 function initiatorAccept(crypto, prevState, responderAuthMsgCiphertext) {
-  if (responderAuthMsgCiphertext.length !== 80) {
-    throw new Error('InitiatorAccept: ResponderAuthMsgCiphertext.length !== 80 bytes')
+  if (responderAuthMsgCiphertext.length !== RESPONDER_AUTHENTICATE_CIPHERTEXT_LENGTH) {
+    throw new Error(
+      `InitiatorAccept: ResponderAuthMsgCiphertext.length !== ${RESPONDER_AUTHENTICATE_CIPHERTEXT_LENGTH} bytes`,
+    )
   }
 
   const {
@@ -483,8 +504,10 @@ function initiatorAccept(crypto, prevState, responderAuthMsgCiphertext) {
   if (responderAuthMsgPlaintext == null) {
     throw new Error('ResponderAccept: ResponderAuthMsgCiphertext failed to decrypt')
   }
-  if (responderAuthMsgPlaintext.length !== 64) {
-    throw new Error('ResponderAccept: ResponderAuthMsgPlaintext.length !== 64 bytes')
+  if (responderAuthMsgPlaintext.length !== RESPONDER_AUTHENTICATE_PLAINTEXT_LENGTH) {
+    throw new Error(
+      `ResponderAccept: ResponderAuthMsgPlaintext.length !== ${RESPONDER_AUTHENTICATE_PLAINTEXT_LENGTH} bytes`,
+    )
   }
 
   const responderAuthProofSig = responderAuthMsgPlaintext
@@ -507,5 +530,46 @@ function initiatorAccept(crypto, prevState, responderAuthMsgCiphertext) {
   return {
     ...prevState,
     sharedSecretInitiatorStaticResponderEphemeral,
+    responderAuthMsgKey,
+  }
+}
+
+/**
+ * @param {SecretHandshakeCrypto} crypto
+ * @param {InitiatorAcceptState | ResponderAuthenticateState} state
+ * @returns {PostKnowledgeState}
+ */
+function postKnowledge(crypto, state) {
+  const {
+    networkKey,
+    initiatorEphemeralPublicX25519Key,
+    responderEphemeralPublicX25519Key,
+    initiatorStaticVerifyingEd25519Key,
+    responderStaticVerifyingEd25519Key,
+    initiatorAuthPayload,
+    responderAuthMsgKey,
+  } = state
+
+  const sharedSecretFinal = crypto.hash(responderAuthMsgKey)
+
+  const initiatorToResponderKey = crypto.hash(
+    b4a.concat([sharedSecretFinal, responderStaticVerifyingEd25519Key]),
+  )
+  const initiatorToResponderNonce = crypto.auth(responderEphemeralPublicX25519Key, networkKey)
+
+  const responderToInitiatorKey = crypto.hash(
+    b4a.concat([sharedSecretFinal, initiatorStaticVerifyingEd25519Key]),
+  )
+  const responderToInitiatorNonce = crypto.auth(initiatorEphemeralPublicX25519Key, networkKey)
+
+  return {
+    networkKey,
+    initiatorStaticVerifyingEd25519Key,
+    responderStaticVerifyingEd25519Key,
+    initiatorAuthPayload,
+    initiatorToResponderKey,
+    initiatorToResponderNonce,
+    responderToInitiatorKey,
+    responderToInitiatorNonce,
   }
 }

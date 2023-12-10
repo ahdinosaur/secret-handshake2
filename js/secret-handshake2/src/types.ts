@@ -50,10 +50,12 @@ export type ResponderAcceptState = ResponderHelloState & {
 
 export type ResponderAuthenticateState = ResponderAcceptState & {
   sharedSecretInitiatorStaticResponderEphemeral: B4A
+  responderAuthMsgKey: B4A
 }
 
 export type InitiatorAcceptState = InitiatorAuthenticateState & {
   sharedSecretInitiatorStaticResponderEphemeral: B4A
+  responderAuthMsgKey: B4A
 }
 
 export type PostKnowledgeState = {
