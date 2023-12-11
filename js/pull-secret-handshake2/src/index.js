@@ -1,9 +1,7 @@
 const {
   INITIATOR_HELLO_LENGTH,
   RESPONDER_HELLO_LENGTH,
-  INITIATOR_AUTHENTICATE_PLAINTEXT_LENGTH,
   INITIATOR_AUTHENTICATE_CIPHERTEXT_LENGTH,
-  RESPONDER_AUTHENTICATE_PLAINTEXT_LENGTH,
   RESPONDER_AUTHENTICATE_CIPHERTEXT_LENGTH,
   initiatorHello,
   responderAcknowledge,
@@ -22,7 +20,7 @@ const pullHandshake = require('pull-handshake')
  * @typedef {Buffer | Uint8Array} B4A
  * @typedef {import('pull-stream').Source<B4A>} Source
  * @typedef {import('pull-stream').Sink<B4A>} Sink
- * @typedef {import('pull-stream').Through<B4A>} Through
+ * @typedef {import('pull-stream').Through<B4A, B4A>} Through
  * @typedef {import('pull-stream').Duplex<B4A, B4A>} Duplex
  * @typedef {(key: B4A, nonce: B4A) => Through} CreateEncrypter
  * @typedef {(key: B4A, nonce: B4A) => Through} CreateDecrypter
@@ -97,7 +95,10 @@ function createInitiator(protocolOptions, initiatorOptions) {
 
       handshake.read(RESPONDER_HELLO_LENGTH, (err, responderHelloMsg) => {
         if (err) {
-          return abort(err, 'Initiator: Error when expecting responder to reply with hello.')
+          return abort(
+            err,
+            'Initiator: Error when expecting responder to reply with hello message.',
+          )
         }
 
         try {
@@ -126,7 +127,7 @@ function createInitiator(protocolOptions, initiatorOptions) {
             if (err) {
               return abort(
                 err,
-                'Initiator: Error when expecting responder to reply with authenticate.',
+                'Initiator: Error when expecting responder to reply with authenticate message.',
               )
             }
 
@@ -172,21 +173,135 @@ function createInitiator(protocolOptions, initiatorOptions) {
  * @param {{
  *   responderStaticSigningEd25519Key: B4A,
  *   responderStaticVerifyingEd25519Key: B4A,
+ *   authorize: (
+ *     initiatorStaticVerifyingEd25519Key: B4A,
+ *     initiatorAuthPlayload: B4A | null
+ *   ) => Promise<boolean>
  *   networkKey: B4A,
  *   timeout: number
  * }} responderOptions
  */
 function createResponder(protocolOptions, responderOptions) {
   const { createEncrypter, createDecrypter } = protocolOptions
-  const { responderStaticVerifyingEd25519Key, initiatorAuthPayload } = responderOptions
+  const {
+    responderStaticSigningEd25519Key,
+    responderStaticVerifyingEd25519Key,
+    authorize,
+    networkKey,
+    timeout,
+  } = responderOptions
 
   /**
    * @returns {Promise<{
    *   initiatorStaticVerifyingEd25519Key: B4A,
+   *   isAuthorized: true
    *   stream: Duplex
    * }>}
    */
-  return function respondHandshake() {}
+  return function respondHandshake() {
+    return new Promise((resolve, reject) => {
+      const { handshake, source, sink } = pullHandshake({ timeout }, reject)
+      const stream = { source, sink }
+
+      const abort = createAbort(handshake.abort)
+
+      handshake.read(INITIATOR_HELLO_LENGTH, (err, initiatorHelloMsg) => {
+        if (err) {
+          return abort(err, 'Responder: Error when expecting initiator to send hello message.')
+        }
+
+        try {
+          var responderAcknowledgeState = responderAcknowledge(
+            {
+              networkKey,
+              responderStaticSigningEd25519Key,
+              responderStaticVerifyingEd25519Key,
+            },
+            initiatorHelloMsg,
+          )
+        } catch (err) {
+          // @ts-ignore
+          return abort(err, 'Responder: Failed to acknowledge initiator hello message.')
+        }
+
+        try {
+          var [responderHelloState, responderHelloMsg] = responderHello(responderAcknowledgeState)
+        } catch (err) {
+          // @ts-ignore
+          return abort(err, 'Responder: Failed to create hello message.')
+        }
+
+        handshake.write(responderHelloMsg)
+
+        handshake.read(
+          INITIATOR_AUTHENTICATE_CIPHERTEXT_LENGTH,
+          (err, initiatorAuthenticateMsg) => {
+            if (err) {
+              return abort(
+                err,
+                'Responder: Error when expecting initiator to send authenticate message.',
+              )
+            }
+
+            try {
+              var responderAcceptState = responderAccept(
+                responderHelloState,
+                initiatorAuthenticateMsg,
+              )
+            } catch (err) {
+              // @ts-ignore
+              return abort(err, 'Responder: Failed to accept initiator authenticate message.')
+            }
+
+            const { initiatorStaticVerifyingEd25519Key, initiatorAuthPayload } =
+              responderAcceptState
+            authorize(initiatorStaticVerifyingEd25519Key, initiatorAuthPayload)
+              .then((isAuthorized) => {
+                if (!isAuthorized) {
+                  return abort(null, 'Responder: Unauthorized initiator.')
+                }
+
+                try {
+                  var [responderAuthenticateState, responderAuthenticateMsg] =
+                    responderAuthenticate(responderAcceptState)
+                } catch (err) {
+                  // @ts-ignore
+                  return abort(err, 'Responder: Failed to create authenticate message.')
+                }
+
+                handshake.write(responderAuthenticateMsg)
+
+                try {
+                  var postKnowledgeState = postKnowledge(responderAuthenticateState)
+                } catch (err) {
+                  // @ts-ignore
+                  return abort(err, 'Responder: Failed to create post-handshake knowledge.')
+                }
+
+                const encryptKey = postKnowledgeState.responderToInitiatorKey
+                const encryptNonce = postKnowledgeState.responderToInitiatorNonce
+                const encrypter = createEncrypter(encryptKey, encryptNonce)
+                const decryptKey = postKnowledgeState.initiatorToResponderKey
+                const decryptNonce = postKnowledgeState.initiatorToResponderNonce
+                const decrypter = createDecrypter(decryptKey, decryptNonce)
+
+                resolve({
+                  isAuthorized,
+                  initiatorStaticVerifyingEd25519Key,
+                  stream: {
+                    source: pull(stream.source, decrypter),
+                    sink: pull(encrypter, stream.sink),
+                  },
+                })
+              })
+              .catch((err) => {
+                return abort(err, 'Responder: Failed to authorize initiator authenticate message.')
+              })
+          },
+        )
+      })
+    })
+  }
 }
 
 /**
