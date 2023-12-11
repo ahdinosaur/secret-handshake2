@@ -1,5 +1,5 @@
 {
-  "name": "secret-handshake2",
+  "name": "pull-secret-handshake2",
   "version": "0.0.0",
   "description": "Mutually authenticating key agreement to establish shared secrets over an insecure channel.",
   "type": "commonjs",
@@ -41,9 +41,13 @@
   },
   "homepage": "https://github.com/ahdinosaur/secret-handshake2#readme",
   "dependencies": {
-    "@types/sodium-native": "^2.3.9",
     "b4a": "^1.6.4",
     "debug": "^4.3.4",
-    "sodium-universal": "^4.0.0"
+    "pull-handshake": "^1.1.4",
+    "pull-stream": "^3.7.0",
+    "secret-handshake2": "^0.0.0"
+  },
+  "devDependencies": {
+    "@types/pull-stream": "^3.6.7"
   }
 }

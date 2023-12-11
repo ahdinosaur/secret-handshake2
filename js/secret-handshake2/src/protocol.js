@@ -48,10 +48,7 @@ function protocol(crypto) {
 /**
  * @param {SecretHandshakeCrypto} crypto
  * @param {InitiatorPreKnowledgeState} prevState
- * @returns {{
- *   state: InitiatorHelloState
- *   msg: B4A,
- * }}
+ * @returns {[InitiatorHelloState, B4A]}
  */
 function initiatorHello(crypto, prevState) {
   const { networkKey } = prevState
@@ -67,14 +64,14 @@ function initiatorHello(crypto, prevState) {
     crypto.auth(initiatorEphemeralPublicX25519Key, initiatorHelloMsgKey),
   ])
 
-  return {
-    state: {
+  return [
+    {
       ...prevState,
       initiatorEphemeralSecretX25519Key,
       initiatorEphemeralPublicX25519Key,
     },
-    msg: initiatorHelloMsg,
-  }
+    initiatorHelloMsg,
+  ]
 }
 
 /**
@@ -115,10 +112,7 @@ function responderAcknowledge(crypto, prevState, initiatorHelloMsg) {
 /**
  * @param {SecretHandshakeCrypto} crypto
  * @param {ResponderAcknowledgeState} prevState
- * @returns {{
- *   state: ResponderHelloState
- *   msg: B4A
- * }}
+ * @returns {[ResponderHelloState, B4A]}
  */
 function responderHello(crypto, prevState) {
   const { networkKey, initiatorEphemeralPublicX25519Key } = prevState
@@ -141,15 +135,15 @@ function responderHello(crypto, prevState) {
     crypto.auth(responderEphemeralPublicX25519Key, responderHelloMsgKey),
   ])
 
-  return {
-    state: {
+  return [
+    {
       ...prevState,
       responderEphemeralSecretX25519Key,
       responderEphemeralPublicX25519Key,
       sharedSecretInitiatorEphemeralResponderEphemeral,
     },
-    msg: responderHelloMsg,
-  }
+    responderHelloMsg,
+  ]
 }
 
 /**
@@ -199,10 +193,7 @@ function initiatorAcknowledge(crypto, prevState, responderHelloMsg) {
 /**
  * @param {SecretHandshakeCrypto} crypto
  * @param {InitiatorAcknowledgeState} prevState
- * @returns {{
- *   state: InitiatorAuthenticateState,
- *   msg: B4A,
- * }}
+ * @returns {[InitiatorAuthenticateState, B4A]}
  */
 function initiatorAuthenticate(crypto, prevState) {
   const {
@@ -268,15 +259,15 @@ function initiatorAuthenticate(crypto, prevState) {
     initiatorAuthMsgPlaintext,
   )
 
-  return {
-    state: {
+  return [
+    {
       ...prevState,
       handshakeId,
       sharedSecretInitiatorEphemeralResponderStatic,
       initiatorAuthProofSig,
     },
-    msg: initiatorAuthMsgCiphertext,
-  }
+    initiatorAuthMsgCiphertext,
+  ]
 }
 
 /**
@@ -378,10 +369,7 @@ function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
 /**
  * @param {SecretHandshakeCrypto} crypto
  * @param {ResponderAcceptState} prevState
- * @returns {{
- *   state: ResponderAuthenticateState,
- *   msg: B4A,
- * }}
+ * @returns {[ResponderAuthenticateState, B4A]}
  */
 function responderAuthenticate(crypto, prevState) {
   const {
@@ -436,14 +424,14 @@ function responderAuthenticate(crypto, prevState) {
     responderAuthMsgPlaintext,
   )
 
-  return {
-    state: {
+  return [
+    {
       ...prevState,
       sharedSecretInitiatorStaticResponderEphemeral,
       responderAuthMsgKey,
     },
-    msg: responderAuthMsgCiphertext,
-  }
+    responderAuthMsgCiphertext,
+  ]
 }
 
 /**
