@@ -346,7 +346,13 @@ assert(
 )
 ```
 
-The responder then generates the first shared secret.
+### Responder Hello
+
+Now the responder reciprocates with their own hello.
+
+The responder generates a new ephemeral public and secret keypair.
+
+The responder can now generate the first shared secret: $`a ⋅ b`$
 
 Responder:
 
@@ -373,13 +379,7 @@ shared_secret_ab = DiffieHellman(
 >
 > Mathemagic!
 
-### Responder Hello
-
-Now the responder reciprocates with their own hello.
-
-The responder generates a new ephemeral public and secret keypair.
-
-Then sends "Responder Hello": a message which combines:
+Next the responder sends "Responder Hello": a message which combines:
 
 - proof that the initiator knows the network key,
 - and the initiator's new ephemeral public key
@@ -395,9 +395,9 @@ responder_hello_msg_key = Hash(
 )
 
 responder_hello_msg = Concat(
-  initiator_ephemeral_public_key,
+  responder_ephemeral_public_key,
   Auth(
-    msg: initiator_ephemeral_public_key,
+    msg: responder_ephemeral_public_key,
     key: responder_hello_msg_key,
   )
 )

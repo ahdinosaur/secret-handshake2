@@ -1,0 +1,48 @@
+{
+  "name": "secret-handshake2",
+  "version": "0.0.0",
+  "description": "Mutually authenticating key agreement to establish shared secrets over an insecure channel.",
+  "type": "commonjs",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src/**/*"
+  ],
+  "scripts": {
+    "prepublishOnly": "npm run build",
+    "build": "tsc --build --clean && tsc --build",
+    "test": "npm run build && node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahdinosaur/secret-handshake2.git"
+  },
+  "keywords": [
+    "cryptography",
+    "ed25519",
+    "x25519",
+    "handshake",
+    "scuttlebutt",
+    "scuttlebutt",
+    "ssb",
+    "shs",
+    "key-agreement",
+    "key-exchange",
+    "secret-handshake"
+  ],
+  "author": "Michael Williams <hello@mikey.nz>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/ahdinosaur/secret-handshake2/issues"
+  },
+  "homepage": "https://github.com/ahdinosaur/secret-handshake2#readme",
+  "dependencies": {
+    "@types/sodium-native": "^2.3.9",
+    "b4a": "^1.6.4",
+    "debug": "^4.3.4",
+    "sodium-universal": "^4.0.0"
+  }
+}
