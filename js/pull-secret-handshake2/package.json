@@ -44,7 +44,7 @@
     "debug": "^4.3.4",
     "pull-handshake": "^1.1.4",
     "pull-stream": "^3.7.0",
-    "secret-handshake2": "^0.0.0"
+    "secret-handshake2": "^0.0.1"
   },
   "devDependencies": {
     "@types/pull-stream": "^3.6.7"
