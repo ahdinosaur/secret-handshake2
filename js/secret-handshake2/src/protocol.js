@@ -255,7 +255,7 @@ function initiatorAuthenticate(crypto, prevState) {
 
   const initiatorAuthMsgCiphertext = crypto.encrypt(
     initiatorAuthMsgKey,
-    b4a.alloc(24, 0),
+    b4a.alloc(crypto.ENCRYPT_NONCE_LENGTH, 0),
     initiatorAuthMsgPlaintext,
   )
 
@@ -317,7 +317,7 @@ function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
 
   const initiatorAuthMsgPlaintext = crypto.decrypt(
     initiatorAuthMsgKey,
-    b4a.alloc(24, 0),
+    b4a.alloc(crypto.ENCRYPT_NONCE_LENGTH, 0),
     initiatorAuthMsgCiphertext,
   )
   if (initiatorAuthMsgPlaintext == null) {
@@ -420,7 +420,7 @@ function responderAuthenticate(crypto, prevState) {
 
   const responderAuthMsgCiphertext = crypto.encrypt(
     responderAuthMsgKey,
-    b4a.alloc(24, 0),
+    b4a.alloc(crypto.ENCRYPT_NONCE_LENGTH, 0),
     responderAuthMsgPlaintext,
   )
 
@@ -486,7 +486,7 @@ function initiatorAccept(crypto, prevState, responderAuthMsgCiphertext) {
 
   const responderAuthMsgPlaintext = crypto.decrypt(
     responderAuthMsgKey,
-    b4a.alloc(24, 0),
+    b4a.alloc(crypto.ENCRYPT_NONCE_LENGTH, 0),
     responderAuthMsgCiphertext,
   )
   if (responderAuthMsgPlaintext == null) {

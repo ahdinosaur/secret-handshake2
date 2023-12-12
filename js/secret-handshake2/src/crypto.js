@@ -1,6 +1,8 @@
 const sodium = require('sodium-universal')
 const b4a = require('b4a')
 
+const ENCRYPT_NONCE_LENGTH = sodium.crypto_aead_chacha20poly1305_ietf_NPUBBYTES
+
 module.exports = {
   hash,
   auth,
@@ -13,6 +15,7 @@ module.exports = {
   signVerify,
   encrypt,
   decrypt,
+  ENCRYPT_NONCE_LENGTH,
 }
 
 /**
