@@ -348,7 +348,7 @@ function responderAccept(crypto, prevState, initiatorAuthMsgCiphertext) {
   ])
 
   const isValidSignature = crypto.signVerify(
-    responderStaticVerifyingEd25519Key,
+    initiatorStaticVerifyingEd25519Key,
     initiatorAuthProof,
     initiatorAuthProofSig,
   )
