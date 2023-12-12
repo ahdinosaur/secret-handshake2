@@ -63,18 +63,27 @@ function createInitiator(protocolOptions, initiatorOptions) {
   /**
    * @param {{
    *   responderStaticVerifyingEd25519Key: B4A,
-   *   initiatorAuthPayload: B4A | null
+   *   initiatorAuthPayload: B4A | null,
    * }} initiateOptions
-   * @returns {Promise<{
-   *   stream: Duplex
-   * }>}
+   * @returns {{
+   *   handshake: Duplex,
+   *   application: Promise<{
+   *     stream: Duplex
+   *   }>
+   * }}
    */
   return function initiateHandshake(initiateOptions) {
     const { responderStaticVerifyingEd25519Key, initiatorAuthPayload } = initiateOptions
 
-    return new Promise((resolve, reject) => {
-      const { handshake, source, sink } = pullHandshake({ timeout }, reject)
-      const stream = { source, sink }
+    /** @type {undefined | ((err: Error | null) => void)} */
+    let applicationReject
+    const { handshake, source, sink } = pullHandshake({ timeout }, (err) => {
+      applicationReject?.(err)
+    })
+    const stream = { source, sink }
+
+    const application = new Promise((resolve, reject) => {
+      applicationReject = reject
 
       const abort = createAbort(handshake.abort)
 
@@ -148,6 +157,8 @@ function createInitiator(protocolOptions, initiatorOptions) {
               return abort(err, 'Initiator: Failed to create post-handshake knowledge.')
             }
 
+            const restStream = handshake.rest()
+
             const encryptKey = postKnowledgeState.initiatorToResponderKey
             const encryptNonce = postKnowledgeState.initiatorToResponderNonce
             const encrypter = createEncrypter(encryptKey, encryptNonce)
@@ -157,14 +168,19 @@ function createInitiator(protocolOptions, initiatorOptions) {
 
             resolve({
               stream: {
-                source: pull(stream.source, decrypter),
-                sink: pull(encrypter, stream.sink),
+                source: pull(restStream.source, decrypter),
+                sink: pull(encrypter, restStream.sink),
               },
             })
           },
         )
       })
     })
+
+    return {
+      handshake: stream,
+      application,
+    }
   }
 }
 
@@ -192,16 +208,25 @@ function createResponder(protocolOptions, responderOptions) {
   } = responderOptions
 
   /**
-   * @returns {Promise<{
-   *   initiatorStaticVerifyingEd25519Key: B4A,
-   *   isAuthorized: true
-   *   stream: Duplex
-   * }>}
+   * @returns {{
+   *   handshake: Duplex,
+   *   application: Promise<{
+   *     initiatorStaticVerifyingEd25519Key: B4A,
+   *     isAuthorized: true
+   *     stream: Duplex
+   *   }>
+   * }}
    */
   return function respondHandshake() {
-    return new Promise((resolve, reject) => {
-      const { handshake, source, sink } = pullHandshake({ timeout }, reject)
-      const stream = { source, sink }
+    /** @type {undefined | ((err: Error | null) => void)} */
+    let applicationReject
+    const { handshake, source, sink } = pullHandshake({ timeout }, (err) => {
+      applicationReject?.(err)
+    })
+    const stream = { source, sink }
+
+    const application = new Promise((resolve, reject) => {
+      applicationReject = reject
 
       const abort = createAbort(handshake.abort)
 
@@ -278,6 +303,8 @@ function createResponder(protocolOptions, responderOptions) {
                   return abort(err, 'Responder: Failed to create post-handshake knowledge.')
                 }
 
+                const restStream = handshake.rest()
+
                 const encryptKey = postKnowledgeState.responderToInitiatorKey
                 const encryptNonce = postKnowledgeState.responderToInitiatorNonce
                 const encrypter = createEncrypter(encryptKey, encryptNonce)
@@ -289,8 +316,8 @@ function createResponder(protocolOptions, responderOptions) {
                   isAuthorized,
                   initiatorStaticVerifyingEd25519Key,
                   stream: {
-                    source: pull(stream.source, decrypter),
-                    sink: pull(encrypter, stream.sink),
+                    source: pull(restStream.source, decrypter),
+                    sink: pull(encrypter, restStream.sink),
                   },
                 })
               })
@@ -301,6 +328,11 @@ function createResponder(protocolOptions, responderOptions) {
         )
       })
     })
+
+    return {
+      handshake: stream,
+      application,
+    }
   }
 }
 
