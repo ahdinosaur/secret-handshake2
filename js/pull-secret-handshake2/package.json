@@ -14,8 +14,7 @@
   "scripts": {
     "prepublishOnly": "npm run build",
     "build": "tsc --build --clean && tsc --build",
-    "test": "npm run test:types && node --test",
-    "test:types": "tsc --noEmit"
+    "test": "npm run build && node --test"
   },
   "repository": {
     "type": "git",
