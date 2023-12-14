@@ -22,11 +22,11 @@ const pullHandshake = require('pull-handshake')
  * @typedef {import('pull-stream').Sink<B4A>} Sink
  * @typedef {import('pull-stream').Through<B4A, B4A>} Through
  * @typedef {import('pull-stream').Duplex<B4A, B4A>} Duplex
- * @typedef {(key: B4A, nonce: B4A) => Through} CreateEncrypter
- * @typedef {(key: B4A, nonce: B4A) => Through} CreateDecrypter
+ * @typedef {(key: B4A, nonce: B4A) => Through} CreateEncrypterStream
+ * @typedef {(key: B4A, nonce: B4A) => Through} CreateDecrypterStream
  * @typedef {{
- *   createEncrypter: CreateEncrypter
- *   createDecrypter: CreateDecrypter
+ *   createEncrypterStream: CreateEncrypterStream
+ *   createDecrypterStream: CreateDecrypterStream
  * }} ProtocolOptions
  */
 
@@ -52,7 +52,7 @@ function createHandshakeProtocol(protocolOptions) {
  * }} initiatorOptions
  */
 function createInitiator(protocolOptions, initiatorOptions) {
-  const { createEncrypter, createDecrypter } = protocolOptions
+  const { createEncrypterStream, createDecrypterStream } = protocolOptions
   const {
     networkKey,
     initiatorStaticSigningEd25519Key,
@@ -161,15 +161,15 @@ function createInitiator(protocolOptions, initiatorOptions) {
 
             const encryptKey = postKnowledgeState.initiatorToResponderKey
             const encryptNonce = postKnowledgeState.initiatorToResponderNonce
-            const encrypter = createEncrypter(encryptKey, encryptNonce)
+            const encrypterStream = createEncrypterStream(encryptKey, encryptNonce)
             const decryptKey = postKnowledgeState.responderToInitiatorKey
             const decryptNonce = postKnowledgeState.responderToInitiatorNonce
-            const decrypter = createDecrypter(decryptKey, decryptNonce)
+            const decrypterStream = createDecrypterStream(decryptKey, decryptNonce)
 
             resolve({
               stream: {
-                source: pull(restStream.source, decrypter),
-                sink: pull(encrypter, restStream.sink),
+                source: pull(restStream.source, decrypterStream),
+                sink: pull(encrypterStream, restStream.sink),
               },
             })
           },
@@ -198,7 +198,7 @@ function createInitiator(protocolOptions, initiatorOptions) {
  * }} responderOptions
  */
 function createResponder(protocolOptions, responderOptions) {
-  const { createEncrypter, createDecrypter } = protocolOptions
+  const { createEncrypterStream, createDecrypterStream } = protocolOptions
   const {
     responderStaticSigningEd25519Key,
     responderStaticVerifyingEd25519Key,
@@ -307,17 +307,17 @@ function createResponder(protocolOptions, responderOptions) {
 
                 const encryptKey = postKnowledgeState.responderToInitiatorKey
                 const encryptNonce = postKnowledgeState.responderToInitiatorNonce
-                const encrypter = createEncrypter(encryptKey, encryptNonce)
+                const encrypterStream = createEncrypterStream(encryptKey, encryptNonce)
                 const decryptKey = postKnowledgeState.initiatorToResponderKey
                 const decryptNonce = postKnowledgeState.initiatorToResponderNonce
-                const decrypter = createDecrypter(decryptKey, decryptNonce)
+                const decrypterStream = createDecrypterStream(decryptKey, decryptNonce)
 
                 resolve({
                   isAuthorized,
                   initiatorStaticVerifyingEd25519Key,
                   stream: {
-                    source: pull(restStream.source, decrypter),
-                    sink: pull(encrypter, restStream.sink),
+                    source: pull(restStream.source, decrypterStream),
+                    sink: pull(encrypterStream, restStream.sink),
                   },
                 })
               })
