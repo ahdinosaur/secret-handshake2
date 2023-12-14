@@ -66,9 +66,13 @@ function createInitiator(protocolOptions, initiatorOptions) {
    *   initiatorAuthPayload: B4A | null,
    * }} initiateOptions
    * @returns {{
-   *   handshake: Duplex,
+   *   stream: Duplex,
    *   application: Promise<{
    *     stream: Duplex
+   *     encryptKey: B4A,
+   *     encryptNonce: B4A,
+   *     decryptKey: B4A,
+   *     decryptNonce: B4A,
    *   }>
    * }}
    */
@@ -171,6 +175,10 @@ function createInitiator(protocolOptions, initiatorOptions) {
                 source: pull(restStream.source, decrypterStream),
                 sink: pull(encrypterStream, restStream.sink),
               },
+              encryptKey,
+              encryptNonce,
+              decryptKey,
+              decryptNonce,
             })
           },
         )
@@ -178,7 +186,7 @@ function createInitiator(protocolOptions, initiatorOptions) {
     })
 
     return {
-      handshake: stream,
+      stream,
       application,
     }
   }
@@ -209,11 +217,14 @@ function createResponder(protocolOptions, responderOptions) {
 
   /**
    * @returns {{
-   *   handshake: Duplex,
+   *   stream: Duplex,
    *   application: Promise<{
    *     initiatorStaticVerifyingEd25519Key: B4A,
-   *     isAuthorized: true
    *     stream: Duplex
+   *     encryptKey: B4A,
+   *     encryptNonce: B4A,
+   *     decryptKey: B4A,
+   *     decryptNonce: B4A,
    *   }>
    * }}
    */
@@ -313,12 +324,15 @@ function createResponder(protocolOptions, responderOptions) {
                 const decrypterStream = createDecrypterStream(decryptKey, decryptNonce)
 
                 resolve({
-                  isAuthorized,
-                  initiatorStaticVerifyingEd25519Key,
                   stream: {
                     source: pull(restStream.source, decrypterStream),
                     sink: pull(encrypterStream, restStream.sink),
                   },
+                  initiatorStaticVerifyingEd25519Key,
+                  encryptKey,
+                  encryptNonce,
+                  decryptKey,
+                  decryptNonce,
                 })
               })
               .catch((err) => {
@@ -330,7 +344,7 @@ function createResponder(protocolOptions, responderOptions) {
     })
 
     return {
-      handshake: stream,
+      stream,
       application,
     }
   }
