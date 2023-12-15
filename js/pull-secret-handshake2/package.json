@@ -1,6 +1,6 @@
 {
   "name": "pull-secret-handshake2",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Mutually authenticating key agreement to establish shared secrets over an insecure channel.",
   "type": "commonjs",
   "main": "./src/index.js",
