@@ -69,6 +69,8 @@ function createInitiator(protocolOptions, initiatorOptions) {
    *   stream: Duplex,
    *   application: Promise<{
    *     stream: Duplex
+   *     initiatorStaticVerifyingEd25519Key: B4A,
+   *     responderStaticVerifyingEd25519Key: B4A
    *     encryptKey: B4A,
    *     encryptNonce: B4A,
    *     decryptKey: B4A,
@@ -175,6 +177,8 @@ function createInitiator(protocolOptions, initiatorOptions) {
                 source: pull(restStream.source, decrypterStream),
                 sink: pull(encrypterStream, restStream.sink),
               },
+              initiatorStaticVerifyingEd25519Key,
+              responderStaticVerifyingEd25519Key,
               encryptKey,
               encryptNonce,
               decryptKey,
@@ -222,6 +226,7 @@ function createResponder(protocolOptions, responderOptions) {
    *   application: Promise<{
    *     stream: Duplex
    *     initiatorStaticVerifyingEd25519Key: B4A,
+   *     responderStaticVerifyingEd25519Key: B4A
    *     authorization: Authorization
    *     encryptKey: B4A,
    *     encryptNonce: B4A,
@@ -330,8 +335,9 @@ function createResponder(protocolOptions, responderOptions) {
                     source: pull(restStream.source, decrypterStream),
                     sink: pull(encrypterStream, restStream.sink),
                   },
-                  authorization,
                   initiatorStaticVerifyingEd25519Key,
+                  responderStaticVerifyingEd25519Key,
+                  authorization,
                   encryptKey,
                   encryptNonce,
                   decryptKey,
