@@ -193,6 +193,7 @@ function createInitiator(protocolOptions, initiatorOptions) {
 }
 
 /**
+ * @template Authorization
  * @param {ProtocolOptions} protocolOptions
  * @param {{
  *   responderStaticSigningEd25519Key: B4A,
@@ -200,7 +201,7 @@ function createInitiator(protocolOptions, initiatorOptions) {
  *   authorize: (
  *     initiatorStaticVerifyingEd25519Key: B4A,
  *     initiatorAuthPlayload: B4A | null
- *   ) => Promise<boolean>
+ *   ) => Promise<Authorization | false>
  *   networkKey: B4A,
  *   timeout: number
  * }} responderOptions
@@ -219,8 +220,9 @@ function createResponder(protocolOptions, responderOptions) {
    * @returns {{
    *   stream: Duplex,
    *   application: Promise<{
-   *     initiatorStaticVerifyingEd25519Key: B4A,
    *     stream: Duplex
+   *     initiatorStaticVerifyingEd25519Key: B4A,
+   *     authorization: Authorization
    *     encryptKey: B4A,
    *     encryptNonce: B4A,
    *     decryptKey: B4A,
@@ -292,8 +294,8 @@ function createResponder(protocolOptions, responderOptions) {
             const { initiatorStaticVerifyingEd25519Key, initiatorAuthPayload } =
               responderAcceptState
             authorize(initiatorStaticVerifyingEd25519Key, initiatorAuthPayload)
-              .then((isAuthorized) => {
-                if (!isAuthorized) {
+              .then((authorization) => {
+                if (authorization === false) {
                   return abort(null, 'Responder: Unauthorized initiator.')
                 }
 
@@ -328,6 +330,7 @@ function createResponder(protocolOptions, responderOptions) {
                     source: pull(restStream.source, decrypterStream),
                     sink: pull(encrypterStream, restStream.sink),
                   },
+                  authorization,
                   initiatorStaticVerifyingEd25519Key,
                   encryptKey,
                   encryptNonce,
